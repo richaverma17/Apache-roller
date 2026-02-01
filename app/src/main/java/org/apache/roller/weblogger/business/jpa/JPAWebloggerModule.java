@@ -64,8 +64,11 @@ public class JPAWebloggerModule implements Module {
 
         binder.bind(Weblogger.class).to(JPAWebloggerImpl.class);
         
-        binder.bind(JPAPersistenceStrategy.class);       
-        
+        binder.bind(JPAPersistenceStrategy.class);
+        binder.bind(CommentService.class);
+        binder.bind(CategoryService.class);
+        binder.bind(TagService.class);
+        binder.bind(WeblogEntryRepository.class);
         binder.bind(AutoPingManager.class).to(     JPAAutoPingManagerImpl.class);   
         binder.bind(BookmarkManager.class).to(     JPABookmarkManagerImpl.class);  
         binder.bind(PingQueueManager.class).to(    JPAPingQueueManagerImpl.class);   

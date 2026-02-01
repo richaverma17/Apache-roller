@@ -1,10 +1,9 @@
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ *  contributor license agreements.  The ASF licenses this file to You
+ * under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -12,7 +11,9 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License.
+ * limitations under the License.  For additional information regarding
+ * copyright in this work, please see the NOTICE file in the top level
+ * directory of this distribution.
  */
 
 package org.apache.roller.weblogger.business;
@@ -23,131 +24,121 @@ import org.apache.roller.weblogger.business.startup.WebloggerStartup;
 import org.apache.roller.weblogger.config.WebloggerConfig;
 import org.apache.roller.weblogger.util.Reflection;
 
+
 /**
  * Provides access to the Weblogger instance and bootstraps the business tier.
  */
 public final class WebloggerFactory {
-
+    
     private static final Log LOG = LogFactory.getLog(WebloggerFactory.class);
-
-    private static WebloggerProvider webloggerProvider;
+    
+    // our configured weblogger provider
+    private static WebloggerProvider webloggerProvider = null;
 
     // non-instantiable
     private WebloggerFactory() {
+        // hello all you beautiful people
     }
 
     /**
-     * True if bootstrap process has been completed.
+     * True if bootstrap process has been completed, False otherwise.
      */
     public static boolean isBootstrapped() {
-        return webloggerProvider != null;
+        return (webloggerProvider != null);
     }
-
+    
+    
     /**
-     * Accessor to the Weblogger business tier.
+     * Accessor to the Weblogger Weblogger business tier.
+     * 
+     * @return Weblogger An instance of Weblogger.
+     * @throws IllegalStateException If the app has not been properly bootstrapped yet.
      */
     public static Weblogger getWeblogger() {
-        ensureBootstrapped();
+        if (webloggerProvider == null) {
+            throw new IllegalStateException("Roller Weblogger has not been bootstrapped yet");
+        }
+        
         return webloggerProvider.getWeblogger();
     }
-
+    
+    
     /**
-     * Bootstrap using default provider.
+     * Bootstrap the Roller Weblogger business tier, uses default WebloggerProvider.
+     *
+     * Bootstrapping the application effectively instantiates all the necessary
+     * pieces of the business tier and wires them together so that the app is 
+     * ready to run.
+     *
+     * @throws IllegalStateException If the app has not been properly prepared yet.
+     * @throws BootstrapException If an error happens during the bootstrap process.
      */
     public static void bootstrap() throws BootstrapException {
-        ensurePrepared();
-        WebloggerProvider provider = createDefaultProvider();
-        bootstrap(provider);
-    }
+        
+        // if the app hasn't been properly started so far then bail
+        if (!WebloggerStartup.isPrepared()) {
+            throw new IllegalStateException("Cannot bootstrap until application has been properly prepared");
+        }
+        
+        // lookup our default provider and instantiate it
+        WebloggerProvider defaultProvider;
+        String providerClassname = WebloggerConfig.getProperty("weblogger.provider.class");
+        if(providerClassname != null) {
+            try {
+                defaultProvider = (WebloggerProvider) Reflection.newInstance(providerClassname);
+            } catch (ReflectiveOperationException ex) {
+                throw new BootstrapException("Error instantiating default provider: " + providerClassname + "; exception message: " + ex.getMessage(), ex);
+            }
+        } else {
+            throw new NullPointerException("No provider specified in config property 'weblogger.provider.class'");
+        }
 
+        // now just bootstrap using our default provider
+        bootstrap(defaultProvider);
+    }
+    
+    
     /**
-     * Bootstrap using supplied provider.
+     * Bootstrap the Roller Weblogger business tier, uses specified WebloggerProvider.
+     *
+     * Bootstrapping the application effectively instantiates all the necessary
+     * pieces of the business tier and wires them together so that the app is 
+     * ready to run.
+     *
+     * @param provider A WebloggerProvider to use for bootstrapping.
+     * @throws IllegalStateException If the app has not been properly prepared yet.
+     * @throws BootstrapException If an error happens during the bootstrap process.
      */
     public static void bootstrap(WebloggerProvider provider)
             throws BootstrapException {
-
-        ensurePrepared();
-        ensureProvider(provider);
-
-        LOG.info("Bootstrapping Roller Weblogger business tier");
-        LOG.info("Weblogger Provider = " + provider.getClass().getName());
-
-        webloggerProvider = provider;
-        webloggerProvider.bootstrap();
-
-        ensureWebloggerCreated();
-        logBootstrapSuccess();
-    }
-
-    /* =========================
-       Validation helpers
-       ========================= */
-
-    private static void ensurePrepared() {
+        
+        // if the app hasn't been properly started so far then bail
         if (!WebloggerStartup.isPrepared()) {
-            throw new IllegalStateException(
-                    "Cannot bootstrap until application has been properly prepared");
+            throw new IllegalStateException("Cannot bootstrap until application has been properly prepared");
         }
-    }
-
-    private static void ensureBootstrapped() {
-        if (webloggerProvider == null) {
-            throw new IllegalStateException(
-                    "Roller Weblogger has not been bootstrapped yet");
-        }
-    }
-
-    private static void ensureProvider(WebloggerProvider provider) {
+        
         if (provider == null) {
             throw new NullPointerException("WebloggerProvider is null");
         }
-    }
-
-    private static void ensureWebloggerCreated() throws BootstrapException {
-        if (webloggerProvider.getWeblogger() == null) {
-            throw new BootstrapException(
-                    "Bootstrapping failed, Weblogger instance is null");
+        
+        LOG.info("Bootstrapping Roller Weblogger business tier");
+        
+        LOG.info("Weblogger Provider = " + provider.getClass().getName());
+        
+        // save reference to provider
+        webloggerProvider = provider;
+        
+        // bootstrap weblogger provider
+        webloggerProvider.bootstrap();
+        
+        // make sure we are all set
+        if(webloggerProvider.getWeblogger() == null) {
+            throw new BootstrapException("Bootstrapping failed, Weblogger instance is null");
         }
-    }
-
-    /* =========================
-       Provider creation helpers
-       ========================= */
-
-    private static WebloggerProvider createDefaultProvider()
-            throws BootstrapException {
-
-        String classname = WebloggerConfig.getProperty(
-                "weblogger.provider.class");
-
-        if (classname == null) {
-            throw new NullPointerException(
-                    "No provider specified in config property 'weblogger.provider.class'");
-        }
-
-        return instantiateProvider(classname);
-    }
-
-    private static WebloggerProvider instantiateProvider(String classname)
-            throws BootstrapException {
-
-        try {
-            return (WebloggerProvider) Reflection.newInstance(classname);
-        } catch (ReflectiveOperationException ex) {
-            throw new BootstrapException(
-                    "Error instantiating default provider: " + classname,
-                    ex);
-        }
-    }
-
-    /* =========================
-       Logging helpers
-       ========================= */
-
-    private static void logBootstrapSuccess() {
-        Weblogger weblogger = webloggerProvider.getWeblogger();
+        
         LOG.info("Roller Weblogger business tier successfully bootstrapped");
-        LOG.info("   Version: " + weblogger.getVersion());
-        LOG.info("   Revision: " + weblogger.getRevision());
+        LOG.info("   Version: " + webloggerProvider.getWeblogger().getVersion());
+        LOG.info("   Revision: " + webloggerProvider.getWeblogger().getRevision());
     }
+    
 }

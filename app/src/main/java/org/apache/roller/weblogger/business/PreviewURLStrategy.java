@@ -42,19 +42,13 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
     
     
     /**
-     * Get root url for a given *preview* weblog.  
-     * Optionally for a certain locale.
+     * Builds the common base URL shared by all preview endpoints:
+     *   [context URL] + /roller-ui/authoring/preview/ + [handle] + /[locale]/
      */
-    @Override
-    public String getWeblogURL(Weblog weblog, String locale, boolean absolute) {
-        
-        if(weblog == null) {
-            return null;
-        }
-        
+    private StringBuilder buildPreviewBaseURL(Weblog weblog, String locale, boolean absolute) {
         StringBuilder url = new StringBuilder(URL_BUFFER_SIZE);
         
-        if(absolute) {
+        if (absolute) {
             url.append(WebloggerRuntimeConfig.getAbsoluteContextURL());
         } else {
             url.append(WebloggerRuntimeConfig.getRelativeContextURL());
@@ -62,12 +56,29 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
         
         url.append(PREVIEW_URL_SEGMENT).append(weblog.getHandle()).append('/');
         
-        if(locale != null) {
+        if (locale != null) {
             url.append(locale).append('/');
         }
         
+        return url;
+    }
+
+
+    /**
+     * Get root url for a given *preview* weblog.  
+     * Optionally for a certain locale.
+     */
+    @Override
+    public String getWeblogURL(Weblog weblog, String locale, boolean absolute) {
+        
+        if (weblog == null) {
+            return null;
+        }
+        
+        StringBuilder url = buildPreviewBaseURL(weblog, locale, absolute);
+        
         Map<String, String> params = Collections.emptyMap();
-        if(previewTheme != null) {
+        if (previewTheme != null) {
             params = Map.of("theme", URLUtilities.encode(previewTheme));
         }
         
@@ -85,29 +96,17 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
                                     String previewAnchor,
                                     boolean absolute) {
         
-        if(weblog == null) {
+        if (weblog == null) {
             return null;
         }
 
-        StringBuilder url = new StringBuilder(URL_BUFFER_SIZE);
-        
-        if(absolute) {
-            url.append(WebloggerRuntimeConfig.getAbsoluteContextURL());
-        } else {
-            url.append(WebloggerRuntimeConfig.getRelativeContextURL());
-        }
-        
-        url.append(PREVIEW_URL_SEGMENT).append(weblog.getHandle()).append('/');
-        
-        if(locale != null) {
-            url.append(locale).append('/');
-        }
+        StringBuilder url = buildPreviewBaseURL(weblog, locale, absolute);
         
         Map<String, String> params = new HashMap<>();
-        if(previewTheme != null) {
+        if (previewTheme != null) {
             params.put("theme", URLUtilities.encode(previewTheme));
         }
-        if(previewAnchor != null) {
+        if (previewAnchor != null) {
             params.put("previewEntry", URLUtilities.encode(previewAnchor));
         }
         
@@ -120,46 +119,34 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
      */
     @Override
     public String getWeblogCollectionURL(Weblog weblog,
-                                                      String locale,
-                                                      String category,
-                                                      String dateString,
-                                                      List<String> tags,
-                                                      int pageNum,
-                                                      boolean absolute) {
+                                         String locale,
+                                         String category,
+                                         String dateString,
+                                         List<String> tags,
+                                         int pageNum,
+                                         boolean absolute) {
         
-        if(weblog == null) {
+        if (weblog == null) {
             return null;
         }
 
-        StringBuilder pathinfo = new StringBuilder(URL_BUFFER_SIZE);
+        StringBuilder pathinfo = buildPreviewBaseURL(weblog, locale, absolute);
         Map<String, String> params = new HashMap<>();
-        
-        if(absolute) {
-        	pathinfo.append(WebloggerRuntimeConfig.getAbsoluteContextURL());
-        } else {
-        	pathinfo.append(WebloggerRuntimeConfig.getRelativeContextURL());
-        }
-        
-        pathinfo.append(PREVIEW_URL_SEGMENT).append(weblog.getHandle()).append('/');
-        
-        if(locale != null) {
-        	pathinfo.append(locale).append('/');
-        }
 
         String cat;
-        if("root".equals(category)) {
+        if ("root".equals(category)) {
             cat = null;
         } else {
             cat = category;
         }
         
-        if(cat != null && dateString == null) {
+        if (cat != null && dateString == null) {
             pathinfo.append("category/").append(URLUtilities.encodePath(cat));
             
-        } else if(dateString != null && cat == null) {
+        } else if (dateString != null && cat == null) {
             pathinfo.append("date/").append(dateString);  
         
-        } else if(tags != null && !tags.isEmpty()) {
+        } else if (tags != null && !tags.isEmpty()) {
             pathinfo.append("tags/").append(URLUtilities.getEncodedTagsString(tags));
         } else {
             if (dateString != null) {
@@ -170,11 +157,11 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
             }
         }
 
-        if(pageNum > 0) {
+        if (pageNum > 0) {
             params.put("page", Integer.toString(pageNum));
         }
         
-        if(previewTheme != null) {
+        if (previewTheme != null) {
             params.put("theme", URLUtilities.encode(previewTheme));
         }
 
@@ -187,57 +174,45 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
      */
     @Override
     public String getWeblogPageURL(Weblog weblog,
-                                                String locale,
-                                                String pageLink,
-                                                String entryAnchor,
-                                                String category,
-                                                String dateString,
-                                                List<String> tags,
-                                                int pageNum,
-                                                boolean absolute) {
+                                   String locale,
+                                   String pageLink,
+                                   String entryAnchor,
+                                   String category,
+                                   String dateString,
+                                   List<String> tags,
+                                   int pageNum,
+                                   boolean absolute) {
         
-        if(weblog == null) {
+        if (weblog == null) {
             return null;
         }
         
-        StringBuilder pathinfo = new StringBuilder(URL_BUFFER_SIZE);
+        // If there is no page link then this is just a typical collection url
+        if (pageLink == null) {
+            return getWeblogCollectionURL(weblog, locale, category, dateString, tags, pageNum, absolute);
+        }
+
+        StringBuilder pathinfo = buildPreviewBaseURL(weblog, locale, absolute);
         Map<String, String> params = new HashMap<>();
         
-        if(absolute) {
-            pathinfo.append(WebloggerRuntimeConfig.getAbsoluteContextURL());
-        } else {
-            pathinfo.append(WebloggerRuntimeConfig.getRelativeContextURL());
-        }
-        
-        pathinfo.append(PREVIEW_URL_SEGMENT).append(weblog.getHandle()).append('/');
-        
-        if(locale != null) {
-            pathinfo.append(locale).append('/');
-        }
-        
-        if(previewTheme != null) {
+        if (previewTheme != null) {
             params.put("theme", URLUtilities.encode(previewTheme));
         }
         
-        if(pageLink != null) {
-            pathinfo.append("page/").append(pageLink);
-            
-            // for custom pages we only allow query params
-            if(dateString != null) {
-                params.put("date", dateString);
-            }
-            if(category != null) {
-                params.put("cat", URLUtilities.encode(category));
-            }
-            if(tags != null && !tags.isEmpty()) {
-                params.put("tags", URLUtilities.getEncodedTagsString(tags));
-            }
-            if(pageNum > 0) {
-                params.put("page", Integer.toString(pageNum));
-            }
-        } else {
-            // if there is no page link then this is just a typical collection url
-            return getWeblogCollectionURL(weblog, locale, category, dateString, tags, pageNum, absolute);
+        pathinfo.append("page/").append(pageLink);
+        
+        // For custom pages we only allow query params
+        if (dateString != null) {
+            params.put("date", dateString);
+        }
+        if (category != null) {
+            params.put("cat", URLUtilities.encode(category));
+        }
+        if (tags != null && !tags.isEmpty()) {
+            params.put("tags", URLUtilities.getEncodedTagsString(tags));
+        }
+        if (pageNum > 0) {
+            params.put("page", Integer.toString(pageNum));
         }
         
         return pathinfo.append(URLUtilities.getQueryString(params)).toString();
@@ -250,13 +225,13 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
     @Override
     public String getWeblogResourceURL(Weblog weblog, String filePath, boolean absolute) {
         
-        if(weblog == null) {
+        if (weblog == null) {
             return null;
         }
         
         StringBuilder url = new StringBuilder(URL_BUFFER_SIZE);
         
-        if(absolute) {
+        if (absolute) {
             url.append(WebloggerRuntimeConfig.getAbsoluteContextURL());
         } else {
             url.append(WebloggerRuntimeConfig.getRelativeContextURL());
@@ -264,14 +239,14 @@ public class PreviewURLStrategy extends MultiWeblogURLStrategy {
         
         url.append("/roller-ui/authoring/previewresource/").append(weblog.getHandle()).append('/');
         
-        if(filePath.startsWith("/")) {
+        if (filePath.startsWith("/")) {
             url.append(filePath.substring(1));
         } else {
             url.append(filePath);
         }
         
         Map<String, String> params = Collections.emptyMap();
-        if(previewTheme != null && !WeblogTheme.CUSTOM.equals(previewTheme)) {
+        if (previewTheme != null && !WeblogTheme.CUSTOM.equals(previewTheme)) {
             params = Map.of("theme", URLUtilities.encode(previewTheme));
         }
         
