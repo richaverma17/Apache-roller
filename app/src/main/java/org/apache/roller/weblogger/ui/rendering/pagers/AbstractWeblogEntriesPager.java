@@ -31,15 +31,6 @@ import org.apache.roller.weblogger.pojos.Weblog;
 import org.apache.roller.util.DateUtil;
 import org.apache.roller.weblogger.business.URLStrategy;
 import org.apache.roller.weblogger.util.I18nMessages;
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.TreeMap;
-import org.apache.roller.weblogger.business.WebloggerFactory;
-import org.apache.roller.weblogger.pojos.WeblogEntry;
-import org.apache.roller.weblogger.pojos.WeblogEntrySearchCriteria;
-import org.apache.roller.weblogger.pojos.wrapper.WeblogEntryWrapper;
-import org.apache.roller.weblogger.WebloggerException;
-
 
 /**
  * An abstract implementation of a WeblogEntriesPager.
@@ -55,7 +46,6 @@ public abstract class AbstractWeblogEntriesPager implements WeblogEntriesPager {
     
     // url strategy for building urls
     final URLStrategy urlStrategy;
-    protected boolean more = false;
     
     final Weblog weblog;
     final String locale;
@@ -117,7 +107,7 @@ public abstract class AbstractWeblogEntriesPager implements WeblogEntriesPager {
     
     
     public boolean hasMoreEntries() {
-        return more;
+        return false;
     }
     
     
@@ -240,32 +230,7 @@ public abstract class AbstractWeblogEntriesPager implements WeblogEntriesPager {
         todayCal.setTime(new Date());
         return todayCal.getTime();
     }
-
-    protected Map<Date, List<WeblogEntryWrapper>> fetchAndWrapEntries (
-            WeblogEntrySearchCriteria wesc) throws WebloggerException {
-
-        Map<Date, List<WeblogEntryWrapper>> result = new TreeMap<>(Collections.reverseOrder());
-
-        Map<Date, List<WeblogEntry>> mmap = WebloggerFactory.getWeblogger()
-                .getWeblogEntryManager().getWeblogEntryObjectMap(wesc);
-
-        int count = 0;
-        for (Map.Entry<Date, List<WeblogEntry>> entry : mmap.entrySet()) {
-            List<WeblogEntryWrapper> wrapped = new ArrayList<>();
-            List<WeblogEntry> unwrapped = entry.getValue();
-            for (int i = 0; i < unwrapped.size(); i++) {
-                if (count++ < length) {
-                    wrapped.add(i, WeblogEntryWrapper.wrap(unwrapped.get(i), urlStrategy));
-                } else {
-                    more = true;
-                }
-            }
-            if (!wrapped.isEmpty()) {
-                result.put(entry.getKey(), wrapped);
-            }
-        }
-        return result;
-    }
+    
     
     /**
      * Create URL that encodes pager state using most appropriate forms of URL.

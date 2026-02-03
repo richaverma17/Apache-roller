@@ -71,6 +71,7 @@ public class JPAUserManagerImpl implements UserManager {
         this.strategy.store(user);
     }
 
+    
     @Override
     public void removeUser(User user) throws WebloggerException {
         String userName = user.getUserName();
@@ -143,8 +144,12 @@ public class JPAUserManagerImpl implements UserManager {
         query = strategy.getNamedQuery(
                 "User.getByOpenIdUrl", User.class);
         query.setParameter(1, openIdUrl);
-
-        return executeSingleResultQuery(query);
+        try {
+            user = query.getSingleResult();
+        } catch (NoResultException e) {
+            user = null;
+        }
+        return user;
     }
 
 
@@ -189,8 +194,12 @@ public class JPAUserManagerImpl implements UserManager {
         for (int i=0; i<params.length; i++) {
             query.setParameter(i+1, params[i]);
         }
-
-        User user = executeSingleResultQuery(query);
+        User user;
+        try {
+            user = query.getSingleResult();
+        } catch (NoResultException e) {
+            user = null;
+        }
 
         // add mapping to cache
         if(user != null) {
@@ -401,7 +410,14 @@ public class JPAUserManagerImpl implements UserManager {
     public void grantWeblogPermission(Weblog weblog, User user, List<String> actions) throws WebloggerException {
 
         // first, see if user already has a permission for the specified object
-        WeblogPermission existingPerm = findWeblogPermission(weblog, user , false);
+        TypedQuery<WeblogPermission> q = strategy.getNamedQuery("WeblogPermission.getByUserName&WeblogIdIncludingPending",
+                WeblogPermission.class);
+        q.setParameter(1, user.getUserName());
+        q.setParameter(2, weblog.getHandle());
+        WeblogPermission existingPerm = null;
+        try {
+            existingPerm = q.getSingleResult();
+        } catch (NoResultException ignored) {}
 
         // permission already exists, so add any actions specified in perm argument
         if (existingPerm != null) {
@@ -419,7 +435,15 @@ public class JPAUserManagerImpl implements UserManager {
     public void grantWeblogPermissionPending(Weblog weblog, User user, List<String> actions) throws WebloggerException {
 
         // first, see if user already has a permission for the specified object
-        WeblogPermission existingPerm = findWeblogPermission(weblog, user, false);
+        TypedQuery<WeblogPermission> q = strategy.getNamedQuery("WeblogPermission.getByUserName&WeblogIdIncludingPending",
+                WeblogPermission.class);
+        q.setParameter(1, user.getUserName());
+        q.setParameter(2, weblog.getHandle());
+        WeblogPermission existingPerm = null;
+        try {
+            existingPerm = q.getSingleResult();
+        } catch (NoResultException ignored) {}
+
         // permission already exists, so complain 
         if (existingPerm != null) {
             throw new WebloggerException("Cannot make existing permission into pending permission");
@@ -437,7 +461,17 @@ public class JPAUserManagerImpl implements UserManager {
     public void confirmWeblogPermission(Weblog weblog, User user) throws WebloggerException {
 
         // get specified permission
-        WeblogPermission existingPerm = findWeblogPermission(weblog, user, true);
+        TypedQuery<WeblogPermission> q = strategy.getNamedQuery("WeblogPermission.getByUserName&WeblogIdIncludingPending",
+                WeblogPermission.class);
+        q.setParameter(1, user.getUserName());
+        q.setParameter(2, weblog.getHandle());
+        WeblogPermission existingPerm;
+        try {
+            existingPerm = q.getSingleResult();
+
+        } catch (NoResultException ignored) {
+            throw new WebloggerException("ERROR: permission not found");
+        }
         // set pending to false
         existingPerm.setPending(false);
         this.strategy.store(existingPerm);
@@ -448,7 +482,16 @@ public class JPAUserManagerImpl implements UserManager {
     public void declineWeblogPermission(Weblog weblog, User user) throws WebloggerException {
 
         // get specified permission
-        WeblogPermission existingPerm = findWeblogPermission(weblog, user, true);
+        TypedQuery<WeblogPermission> q = strategy.getNamedQuery("WeblogPermission.getByUserName&WeblogIdIncludingPending",
+                WeblogPermission.class);
+        q.setParameter(1, user.getUserName());
+        q.setParameter(2, weblog.getHandle());
+        WeblogPermission existingPerm;
+        try {
+            existingPerm = q.getSingleResult();
+        } catch (NoResultException ignored) {
+            throw new WebloggerException("ERROR: permission not found");
+        }
         // remove permission
         this.strategy.remove(existingPerm);
     }
@@ -530,7 +573,15 @@ public class JPAUserManagerImpl implements UserManager {
      */
     @Override
     public boolean hasRole(String roleName, User user) throws WebloggerException {
-        return findUserRole(user.getUserName(), roleName) != null;
+        TypedQuery<UserRole> q = strategy.getNamedQuery("UserRole.getByUserNameAndRole", UserRole.class);
+        q.setParameter(1, user.getUserName());
+        q.setParameter(2, roleName);
+        try {
+            q.getSingleResult();
+        } catch (NoResultException e) {
+            return false;
+        }
+        return true;
     }
 
     
@@ -556,54 +607,24 @@ public class JPAUserManagerImpl implements UserManager {
      */
     @Override
     public void grantRole(String roleName, User user) throws WebloggerException {
-
-        if (findUserRole(user.getUserName(), roleName) == null) {
-        UserRole role = new UserRole(user.getUserName(), roleName);
-        this.strategy.store(role);
-    }
+        if (!hasRole(roleName, user)) {
+            UserRole role = new UserRole(user.getUserName(), roleName);
+            this.strategy.store(role);
+        }
     }
 
     
     @Override
     public void revokeRole(String roleName, User user) throws WebloggerException {
-        UserRole role = findUserRole(user.getUserName(), roleName);
-    
-        if (role == null) {
-            throw new WebloggerException("ERROR: removing role");
+        TypedQuery<UserRole> q = strategy.getNamedQuery("UserRole.getByUserNameAndRole", UserRole.class);
+        q.setParameter(1, user.getUserName());
+        q.setParameter(2, roleName);
+        try {
+            UserRole role = q.getSingleResult();
+            this.strategy.remove(role);
+
+        } catch (NoResultException e) {
+            throw new WebloggerException("ERROR: removing role", e);
         }
-        
-        this.strategy.remove(role);
     }
-            //helper methods
-            private WeblogPermission findWeblogPermission(Weblog weblog, User user, boolean throwIfNotFound) throws WebloggerException {
-            TypedQuery<WeblogPermission> q = strategy.getNamedQuery(
-                "WeblogPermission.getByUserName&WeblogIdIncludingPending", WeblogPermission.class);
-            q.setParameter(1, user.getUserName());
-            q.setParameter(2, weblog.getHandle());
-            try {
-                return q.getSingleResult();
-            } catch (NoResultException e) {
-                if (throwIfNotFound) {
-                    throw new WebloggerException("ERROR: permission not found");
-                }
-                return null;
-            }
-        }
-            private <T> T executeSingleResultQuery(TypedQuery<T> query) throws WebloggerException {
-            try {
-                return query.getSingleResult();
-            } catch (NoResultException e) {
-                return null;
-            }
-        }
-            private UserRole findUserRole(String userName, String roleName) throws WebloggerException {
-            TypedQuery<UserRole> q = strategy.getNamedQuery("UserRole.getByUserNameAndRole", UserRole.class);
-            q.setParameter(1, userName);
-            q.setParameter(2, roleName);
-            try {
-                return q.getSingleResult();
-            } catch (NoResultException e) {
-                return null;
-            }
-        }
 }

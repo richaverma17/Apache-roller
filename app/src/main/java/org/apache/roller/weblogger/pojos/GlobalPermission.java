@@ -15,13 +15,11 @@
  * copyright in this work, please see the NOTICE file in the top level
  * directory of this distribution.
  */
-
-package org.apache.roller.weblogger.pojos; 
+package org.apache.roller.weblogger.pojos;
 
 import java.security.Permission;
 import java.util.ArrayList;
 import java.util.List;
-
 import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.roller.weblogger.WebloggerException;
@@ -29,49 +27,35 @@ import org.apache.roller.weblogger.business.WebloggerFactory;
 import org.apache.roller.weblogger.config.WebloggerConfig;
 import org.apache.roller.weblogger.util.Utilities;
 
-
 /**
  * Represents a permission that applies globally to the entire web application.
  */
 public class GlobalPermission extends RollerPermission {
+
     protected String actions;
 
     /** Allowed to login and edit profile */
     public static final String LOGIN  = "login";
-    
+
     /** Allowed to login and do weblogging */
     public static final String WEBLOG = "weblog";
 
     /** Allowed to login and do everything, including site-wide admin */
     public static final String ADMIN  = "admin";
-    
+
     /**
-     * Create global permission for one specific user initialized with the 
+     * Create global permission for one specific user initialized with the
      * actions that are implied by the user's roles.
      * @param user User of permission.
      * @throws org.apache.roller.weblogger.WebloggerException
      */
     public GlobalPermission(User user) throws WebloggerException {
         super("GlobalPermission user: " + user.getUserName());
-        
-        // loop through user's roles, adding actions implied by each
-        List<String> roles = WebloggerFactory.getWeblogger().getUserManager().getRoles(user);
-        List<String> actionsList = new ArrayList<>();
-        for (String role : roles) {
-            String impliedActions = WebloggerConfig.getProperty("role.action." + role);
-            if (impliedActions != null) {
-                List<String> toAdds = Utilities.stringToStringList(impliedActions, ",");
-                for (String toAdd : toAdds) {
-                    if (!actionsList.contains(toAdd)) {
-                        actionsList.add(toAdd);
-                    }
-                }
-            }
-        }
-        setActionsAsList(actionsList);
+        List<String> userActions = extractActionsFromUserRoles(user);
+        setActionsAsList(userActions);
     }
-        
-    /** 
+
+    /**
      * Create global permission with the actions specified by array.
      * @param actions actions to add to permission
      * @throws org.apache.roller.weblogger.WebloggerException
@@ -80,68 +64,142 @@ public class GlobalPermission extends RollerPermission {
         super("GlobalPermission user: N/A");
         setActionsAsList(actions);
     }
-        
-    /** 
-     * Create global permission for one specific user initialized with the 
+
+    /**
+     * Create global permission for one specific user initialized with the
      * actions specified by array.
      * @param user User of permission.
+     * @param actions actions to add to permission
      * @throws org.apache.roller.weblogger.WebloggerException
      */
     public GlobalPermission(User user, List<String> actions) throws WebloggerException {
         super("GlobalPermission user: " + user.getUserName());
         setActionsAsList(actions);
     }
-        
+
+    /**
+     * Extracts actions from user's roles by consulting configuration.
+     * @param user User whose roles to process
+     * @return List of actions implied by user's roles
+     * @throws WebloggerException if unable to retrieve roles
+     */
+    private List<String> extractActionsFromUserRoles(User user) throws WebloggerException {
+        List<String> roles = WebloggerFactory.getWeblogger().getUserManager().getRoles(user);
+        List<String> actionsList = new ArrayList<>();
+
+        for (String role : roles) {
+            addImpliedActionsForRole(role, actionsList);
+        }
+
+        return actionsList;
+    }
+
+    /**
+     * Adds actions implied by a role to the actions list.
+     * @param role Role to process
+     * @param actionsList List to add actions to
+     */
+    private void addImpliedActionsForRole(String role, List<String> actionsList) {
+        String impliedActions = WebloggerConfig.getProperty("role.action." + role);
+
+        if (impliedActions == null) {
+            return;
+        }
+
+        List<String> actionsToAdd = Utilities.stringToStringList(impliedActions, ",");
+        for (String action : actionsToAdd) {
+            if (!actionsList.contains(action)) {
+                actionsList.add(action);
+            }
+        }
+    }
+
     @Override
     public boolean implies(Permission perm) {
+        // Early return if no actions defined
         if (getActionsAsList().isEmpty()) {
-            // new, unsaved user.
             return false;
         }
-        if (perm instanceof WeblogPermission) {
-            if (hasAction(ADMIN)) {
-                // admin implies all other permissions
-                return true;                
-            } 
-        } else if (perm instanceof RollerPermission) {
-            RollerPermission rperm = (RollerPermission)perm;            
-            if (hasAction(ADMIN)) {
-                // admin implies all other permissions
-                return true;
-                
-            } else if (hasAction(WEBLOG)) {
-                // Best we've got is WEBLOG, so make sure perm doesn't specify ADMIN
-                for (String action : rperm.getActionsAsList()) {
-                    if (action.equals(ADMIN)) {
-                        return false;
-                    }
-                }
-                
-            } else if (hasAction(LOGIN)) {
-                // Best we've got is LOGIN, so make sure perm doesn't specify anything else
-                for (String action : rperm.getActionsAsList()) {
-                    if (action.equals(WEBLOG)) {
-                        return false;
-                    }
-                    if (action.equals(ADMIN)) {
-                        return false;
-                    }
-                }
-            }
+
+        // Admin has all permissions
+        if (hasAction(ADMIN)) {
             return true;
         }
+
+        // Delegate to specific permission type handlers
+        if (perm instanceof WeblogPermission) {
+            return impliesWeblogPermission();
+        }
+
+        if (perm instanceof RollerPermission) {
+            return impliesRollerPermission((RollerPermission) perm);
+        }
+
         return false;
     }
-    
-    private boolean actionImplies(String action1, String action2) {
-        return action1.equals(ADMIN) || (action1.equals(WEBLOG) && action2.equals(LOGIN));
+
+    /**
+     * Check if this permission implies a WeblogPermission.
+     * Admin always implies weblog permissions (already checked in main method).
+     * @return true if this permission implies the weblog permission
+     */
+    private boolean impliesWeblogPermission() {
+        // Admin already checked in main implies() method
+        return false;
     }
-    
+
+    /**
+     * Check if this permission implies a RollerPermission.
+     * @param perm The RollerPermission to check
+     * @return true if this permission implies the given permission
+     */
+    private boolean impliesRollerPermission(RollerPermission perm) {
+        // Admin already checked in main implies() method
+
+        if (hasAction(WEBLOG)) {
+            return !permissionRequiresAdmin(perm);
+        }
+
+        if (hasAction(LOGIN)) {
+            return permissionRequiresOnlyLogin(perm);
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks if the permission requires admin action.
+     * @param perm Permission to check
+     * @return true if permission requires admin action
+     */
+    private boolean permissionRequiresAdmin(RollerPermission perm) {
+        return perm.getActionsAsList().contains(ADMIN);
+    }
+
+    /**
+     * Checks if permission requires only login (no weblog or admin).
+     * @param perm Permission to check
+     * @return true if permission requires only login action
+     */
+    private boolean permissionRequiresOnlyLogin(RollerPermission perm) {
+        for (String action : perm.getActionsAsList()) {
+            if (action.equals(WEBLOG) || action.equals(ADMIN)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean actionImplies(String action1, String action2) {
+        return action1.equals(ADMIN) ||
+                (action1.equals(WEBLOG) && action2.equals(LOGIN));
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("GlobalPermission: ");
-        for (String action : getActionsAsList()) { 
+        for (String action : getActionsAsList()) {
             sb.append(" ").append(action).append(" ");
         }
         return sb.toString();
@@ -177,5 +235,4 @@ public class GlobalPermission extends RollerPermission {
                 .append(getActions())
                 .toHashCode();
     }
-
 }

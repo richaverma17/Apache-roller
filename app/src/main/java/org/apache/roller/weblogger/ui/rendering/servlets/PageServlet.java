@@ -138,210 +138,54 @@ public class PageServlet extends HttpServlet {
 
         log.debug("Entering");
 
-        // do referrer processing, if it's enabled
-        // NOTE: this *must* be done first because it triggers a hibernate flush
-        // which will close the active session and cause lazy init exceptions
-        // otherwise
-        if (this.processReferrers) {
-            boolean spam = this.processReferrer(request);
-            if (spam) {
-                log.debug("spammer, giving 'em a 403");
-                if (!response.isCommitted()) {
-                    response.reset();
-                }
-                response.sendError(HttpServletResponse.SC_FORBIDDEN);
-                return;
+        // Check for spam referrers early
+        if (this.processReferrers && this.processReferrer(request)) {
+            log.debug("spammer, giving 'em a 403");
+            if (!response.isCommitted()) {
+                response.reset();
             }
+            response.sendError(HttpServletResponse.SC_FORBIDDEN);
+            return;
         }
 
-        Weblog weblog;
-        boolean isSiteWide;
-
+        // Parse request and get weblog
         WeblogPageRequest pageRequest;
         try {
             pageRequest = new WeblogPageRequest(request);
-
-            weblog = pageRequest.getWeblog();
+            Weblog weblog = pageRequest.getWeblog();
             if (weblog == null) {
                 throw new WebloggerException("unable to lookup weblog: "
                         + pageRequest.getWeblogHandle());
             }
-
-            // is this the site-wide weblog?
-            isSiteWide = WebloggerRuntimeConfig.isSiteWideWeblog(pageRequest
-                    .getWeblogHandle());
         } catch (Exception e) {
-            // some kind of error parsing the request or looking up weblog
             log.debug("error creating page request", e);
             response.sendError(HttpServletResponse.SC_NOT_FOUND);
             return;
         }
 
-        // determine the lastModified date for this content
-        long lastModified = System.currentTimeMillis();
-        if (isSiteWide) {
-            lastModified = siteWideCache.getLastModified().getTime();
-        } else if (weblog.getLastModified() != null) {
-            lastModified = weblog.getLastModified().getTime();
+        boolean isSiteWide = WebloggerRuntimeConfig.isSiteWideWeblog(
+                pageRequest.getWeblogHandle());
+
+        // Handle 304 Not Modified
+        if (!handleNotModified(request, response, pageRequest, isSiteWide)) {
+            return; // 304 was sent
         }
 
-        // 304 Not Modified handling.
-        // We skip this for logged in users to avoid the scenerio where a user
-        // views their weblog, logs in, then gets a 304 without the 'edit' links
-        if (!pageRequest.isLoggedIn()) {
-            if (ModDateHeaderUtil.respondIfNotModified(request, response,
-                    lastModified, pageRequest.getDeviceType())) {
-                return;
-            } else {
-                // set last-modified date
-                ModDateHeaderUtil.setLastModifiedHeader(response, lastModified,
-                        pageRequest.getDeviceType());
-            }
-        }
+        // Generate cache key
+        String cacheKey = generateCacheKey(pageRequest, isSiteWide);
 
-        // generate cache key
-        String cacheKey;
-        if (isSiteWide) {
-            cacheKey = siteWideCache.generateKey(pageRequest);
-        } else {
-            cacheKey = weblogPageCache.generateKey(pageRequest);
-        }
+        // Handle theme reloading in development mode
+        handleThemeReload(pageRequest, isSiteWide);
 
-        // Development only. Reload if theme has been modified
-        if (themeReload
-                && !weblog.getEditorTheme().equals(WeblogTheme.CUSTOM)
-                && (pageRequest.getPathInfo() == null || pageRequest
-                        .getPathInfo() != null
-                        && !pageRequest.getPathInfo().endsWith(".css"))) {
-            try {
-                ThemeManager manager = WebloggerFactory.getWeblogger()
-                        .getThemeManager();
-                boolean reloaded = manager.reLoadThemeFromDisk(weblog
-                        .getEditorTheme());
-                if (reloaded) {
-                    if (isSiteWide) {
-                        siteWideCache.clear();
-                    } else {
-                        weblogPageCache.clear();
-                    }
-                    I18nMessages.reloadBundle(weblog.getLocaleInstance());
-                }
-
-            } catch (Exception ex) {
-                log.error("ERROR - reloading theme " + ex);
-            }
-        }
-
-        // cached content checking
-        if ((!this.excludeOwnerPages || !pageRequest.isLoggedIn())
-                && request.getAttribute("skipCache") == null
-                && request.getParameter("skipCache") == null) {
-
-            CachedContent cachedContent;
-            if (isSiteWide) {
-                cachedContent = (CachedContent) siteWideCache.get(cacheKey);
-            } else {
-                cachedContent = (CachedContent) weblogPageCache.get(cacheKey,
-                        lastModified);
-            }
-
-            if (cachedContent != null) {
-                log.debug("HIT " + cacheKey);
-
-                // allow for hit counting
-                if (!isSiteWide
-                        && (pageRequest.isWebsitePageHit() || pageRequest
-                                .isOtherPageHit())) {
-                    this.processHit(weblog);
-                }
-
-                response.setContentLength(cachedContent.getContent().length);
-                response.setContentType(cachedContent.getContentType());
-                response.getOutputStream().write(cachedContent.getContent());
-                return;
-            } else {
-                log.debug("MISS " + cacheKey);
-            }
+        // Try to serve from cache
+        if (tryServeFromCache(request, response, pageRequest, cacheKey, isSiteWide)) {
+            return; // Cache hit, response sent
         }
 
         log.debug("Looking for template to use for rendering");
 
-        // figure out what template to use
-        ThemeTemplate page = null;
-
-        // If this is a popup request, then deal with it specially
-        // TODO: do we really need to keep supporting this?
-        if (request.getParameter("popup") != null) {
-            try {
-                // Does user have a popupcomments page?
-                page = weblog.getTheme().getTemplateByName("_popupcomments");
-            } catch (Exception e) {
-                // ignored ... considered page not found
-            }
-
-            // User doesn't have one so return the default
-            if (page == null) {
-                page = new StaticThemeTemplate(
-                        "templates/weblog/popupcomments.vm", TemplateLanguage.VELOCITY);
-            }
-
-            // If request specified the page, then go with that
-        } else if ("page".equals(pageRequest.getContext())) {
-            page = pageRequest.getWeblogPage();
-
-            // if we don't have this page then 404, we don't let
-            // this one fall through to the default template
-            if (page == null) {
-                if (!response.isCommitted()) {
-                    response.reset();
-                }
-                response.sendError(HttpServletResponse.SC_NOT_FOUND);
-                return;
-            }
-
-            // If request specified tags section index, then look for custom
-            // template
-        } else if ("tags".equals(pageRequest.getContext())
-                && pageRequest.getTags() != null) {
-            try {
-                page = weblog.getTheme().getTemplateByAction(
-                        ComponentType.TAGSINDEX);
-            } catch (Exception e) {
-                log.error("Error getting weblog page for action 'tagsIndex'", e);
-            }
-
-            // if we don't have a custom tags page then 404, we don't let
-            // this one fall through to the default template
-            if (page == null) {
-                if (!response.isCommitted()) {
-                    response.reset();
-                }
-                response.sendError(HttpServletResponse.SC_NOT_FOUND);
-                return;
-            }
-
-            // If this is a permalink then look for a permalink template
-        } else if (pageRequest.getWeblogAnchor() != null) {
-            try {
-                page = weblog.getTheme().getTemplateByAction(
-                        ComponentType.PERMALINK);
-            } catch (Exception e) {
-                log.error("Error getting weblog page for action 'permalink'", e);
-            }
-        }
-
-        // if we haven't found a page yet then try our default page
-        if (page == null) {
-            try {
-                page = weblog.getTheme().getDefaultTemplate();
-            } catch (Exception e) {
-                log.error(
-                        "Error getting default page for weblog = "
-                                + weblog.getHandle(), e);
-            }
-        }
-
-        // Still no page? Then that is a 404
+        // Find the template to render
+        ThemeTemplate page = findTemplate(request, pageRequest);
         if (page == null) {
             if (!response.isCommitted()) {
                 response.reset();
@@ -352,52 +196,8 @@ public class PageServlet extends HttpServlet {
 
         log.debug("page found, dealing with it");
 
-        // validation. make sure that request input makes sense.
-        boolean invalid = false;
-        if (pageRequest.getWeblogPageName() != null && page.isHidden()) {
-            invalid = true;
-        }
-        // locale view allowed only if weblog has enabled it
-        if (pageRequest.getLocale() != null
-                && !pageRequest.getWeblog().isEnableMultiLang()) {
-            invalid = true;
-        }
-        if (pageRequest.getWeblogAnchor() != null) {
-
-            // permalink specified.
-            // entry must exist, be published before current time, and locale
-            // must match
-            WeblogEntry entry = pageRequest.getWeblogEntry();
-            if (entry == null) {
-                invalid = true;
-            } else if (pageRequest.getLocale() != null
-                    && !entry.getLocale().startsWith(pageRequest.getLocale())) {
-                invalid = true;
-            } else if (!entry.isPublished()) {
-                invalid = true;
-            } else if (new Date().before(entry.getPubTime())) {
-                invalid = true;
-            }
-        } else if (pageRequest.getWeblogCategoryName() != null) {
-
-            // category specified. category must exist.
-            if (pageRequest.getWeblogCategory() == null) {
-                invalid = true;
-            }
-        } else if (pageRequest.getTags() != null && !pageRequest.getTags().isEmpty()) {
-
-            try {
-                // tags specified. make sure they exist.
-                WeblogEntryManager wmgr = WebloggerFactory.getWeblogger()
-                        .getWeblogEntryManager();
-                invalid = !wmgr.getTagComboExists(pageRequest.getTags(),
-                        (isSiteWide) ? null : weblog);
-            } catch (WebloggerException ex) {
-                invalid = true;
-            }
-        }
-
-        if (invalid) {
+        // Validate the request
+        if (isInvalidRequest(pageRequest, page, isSiteWide)) {
             log.debug("page failed validation, bailing out");
             if (!response.isCommitted()) {
                 response.reset();
@@ -406,40 +206,341 @@ public class PageServlet extends HttpServlet {
             return;
         }
 
-        // do we need to force a specific locale for the request?
-        if (pageRequest.getLocale() == null && !weblog.isShowAllLangs()) {
-            pageRequest.setLocale(weblog.getLocale());
+        // Force locale if needed
+        if (pageRequest.getLocale() == null && !pageRequest.getWeblog().isShowAllLangs()) {
+            pageRequest.setLocale(pageRequest.getWeblog().getLocale());
         }
 
-        // allow for hit counting
-        if (!isSiteWide
-                && (pageRequest.isWebsitePageHit() || pageRequest
-                        .isOtherPageHit())) {
-            this.processHit(weblog);
+        // Process hit counting
+        if (!isSiteWide && (pageRequest.isWebsitePageHit() || pageRequest.isOtherPageHit())) {
+            this.processHit(pageRequest.getWeblog());
         }
 
-        // looks like we need to render content
-        // set the content deviceType
-        String contentType;
-        if (StringUtils.isNotEmpty(page.getOutputContentType())) {
-            contentType = page.getOutputContentType() + "; charset=utf-8";
-        } else {
-            final String defaultContentType = "text/html; charset=utf-8";
-            if (page.getLink() == null) {
-                contentType = defaultContentType;
-            } else {
-                String mimeType = RollerContext.getServletContext().getMimeType(
-                        page.getLink());
-                if (mimeType != null) {
-                    // we found a match ... set the content deviceType
-                    contentType = mimeType + "; charset=utf-8";
-                } else {
-                    contentType = defaultContentType;
-                }
+        // Determine content type
+        String contentType = determineContentType(page);
+
+        // Build the rendering model
+        HashMap<String, Object> model = buildRenderingModel(request, response, pageRequest);
+        if (model == null) {
+            // Error already sent in buildRenderingModel
+            return;
+        }
+
+        // Render the content
+        CachedContent rendererOutput = renderContent(page, pageRequest, model, contentType);
+        if (rendererOutput == null) {
+            // Error already sent in renderContent
+            if (!response.isCommitted()) {
+                response.reset();
             }
+            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+            return;
         }
 
+        // Send response
+        log.debug("Flushing response output");
+        response.setContentType(contentType);
+        response.setContentLength(rendererOutput.getContent().length);
+        response.getOutputStream().write(rendererOutput.getContent());
+
+        // Cache the rendered content
+        cacheRenderedContent(request, pageRequest, cacheKey, rendererOutput, isSiteWide);
+
+        log.debug("Exiting");
+    }
+
+    /**
+     * Handle 304 Not Modified logic.
+     * @return true if processing should continue, false if 304 was sent
+     */
+    private boolean handleNotModified(HttpServletRequest request, 
+                                      HttpServletResponse response,
+                                      WeblogPageRequest pageRequest, 
+                                      boolean isSiteWide) throws IOException {
+        
+        Weblog weblog = pageRequest.getWeblog();
+        long lastModified = System.currentTimeMillis();
+        
+        if (isSiteWide) {
+            lastModified = siteWideCache.getLastModified().getTime();
+        } else if (weblog.getLastModified() != null) {
+            lastModified = weblog.getLastModified().getTime();
+        }
+
+        // Skip 304 for logged in users to ensure they see edit links
+        if (!pageRequest.isLoggedIn()) {
+            if (ModDateHeaderUtil.respondIfNotModified(request, response,
+                    lastModified, pageRequest.getDeviceType())) {
+                return false; // 304 sent
+            }
+            ModDateHeaderUtil.setLastModifiedHeader(response, lastModified,
+                    pageRequest.getDeviceType());
+        }
+        
+        return true; // Continue processing
+    }
+
+    /**
+     * Generate cache key for the request.
+     */
+    private String generateCacheKey(WeblogPageRequest pageRequest, boolean isSiteWide) {
+        if (isSiteWide) {
+            return siteWideCache.generateKey(pageRequest);
+        }
+        return weblogPageCache.generateKey(pageRequest);
+    }
+
+    /**
+     * Handle theme reloading in development mode.
+     */
+    private void handleThemeReload(WeblogPageRequest pageRequest, boolean isSiteWide) {
+        Weblog weblog = pageRequest.getWeblog();
+        
+        if (!themeReload || weblog.getEditorTheme().equals(WeblogTheme.CUSTOM)) {
+            return;
+        }
+        
+        if (pageRequest.getPathInfo() != null && pageRequest.getPathInfo().endsWith(".css")) {
+            return;
+        }
+
+        try {
+            ThemeManager manager = WebloggerFactory.getWeblogger().getThemeManager();
+            boolean reloaded = manager.reLoadThemeFromDisk(weblog.getEditorTheme());
+            
+            if (reloaded) {
+                if (isSiteWide) {
+                    siteWideCache.clear();
+                } else {
+                    weblogPageCache.clear();
+                }
+                I18nMessages.reloadBundle(weblog.getLocaleInstance());
+            }
+        } catch (Exception ex) {
+            log.error("ERROR - reloading theme " + ex);
+        }
+    }
+
+    /**
+     * Try to serve content from cache.
+     * @return true if cache hit and response sent, false otherwise
+     */
+    private boolean tryServeFromCache(HttpServletRequest request,
+                                      HttpServletResponse response,
+                                      WeblogPageRequest pageRequest,
+                                      String cacheKey,
+                                      boolean isSiteWide) throws IOException {
+        
+        // Check if caching is disabled
+        if ((this.excludeOwnerPages && pageRequest.isLoggedIn())
+                || request.getAttribute("skipCache") != null
+                || request.getParameter("skipCache") != null) {
+            return false;
+        }
+
+        CachedContent cachedContent;
+        if (isSiteWide) {
+            cachedContent = (CachedContent) siteWideCache.get(cacheKey);
+        } else {
+            Weblog weblog = pageRequest.getWeblog();
+            long lastModified = (weblog.getLastModified() != null) 
+                    ? weblog.getLastModified().getTime() 
+                    : System.currentTimeMillis();
+            cachedContent = (CachedContent) weblogPageCache.get(cacheKey, lastModified);
+        }
+
+        if (cachedContent != null) {
+            log.debug("HIT " + cacheKey);
+
+            // Process hit counting even for cached content
+            if (!isSiteWide && (pageRequest.isWebsitePageHit() || pageRequest.isOtherPageHit())) {
+                this.processHit(pageRequest.getWeblog());
+            }
+
+            response.setContentLength(cachedContent.getContent().length);
+            response.setContentType(cachedContent.getContentType());
+            response.getOutputStream().write(cachedContent.getContent());
+            return true;
+        }
+        
+        log.debug("MISS " + cacheKey);
+        return false;
+    }
+
+    /**
+     * Find the appropriate template for the request.
+     */
+    private ThemeTemplate findTemplate(HttpServletRequest request, 
+                                       WeblogPageRequest pageRequest) {
+        Weblog weblog = pageRequest.getWeblog();
+        ThemeTemplate page = null;
+
+        // Handle popup requests
+        if (request.getParameter("popup") != null) {
+            page = findPopupTemplate(weblog);
+        }
+        // Handle explicit page requests
+        else if ("page".equals(pageRequest.getContext())) {
+            page = pageRequest.getWeblogPage();
+        }
+        // Handle tags index
+        else if ("tags".equals(pageRequest.getContext()) && pageRequest.getTags() != null) {
+            page = findTagsTemplate(weblog);
+        }
+        // Handle permalink
+        else if (pageRequest.getWeblogAnchor() != null) {
+            page = findPermalinkTemplate(weblog);
+        }
+
+        // Fall back to default template
+        if (page == null) {
+            page = findDefaultTemplate(weblog);
+        }
+
+        return page;
+    }
+
+    private ThemeTemplate findPopupTemplate(Weblog weblog) {
+        try {
+            ThemeTemplate page = weblog.getTheme().getTemplateByName("_popupcomments");
+            if (page != null) {
+                return page;
+            }
+        } catch (Exception e) {
+            // ignored ... considered page not found
+        }
+        return new StaticThemeTemplate("templates/weblog/popupcomments.vm", 
+                                       TemplateLanguage.VELOCITY);
+    }
+
+    private ThemeTemplate findTagsTemplate(Weblog weblog) {
+        try {
+            return weblog.getTheme().getTemplateByAction(ComponentType.TAGSINDEX);
+        } catch (Exception e) {
+            log.error("Error getting weblog page for action 'tagsIndex'", e);
+        }
+        return null;
+    }
+
+    private ThemeTemplate findPermalinkTemplate(Weblog weblog) {
+        try {
+            return weblog.getTheme().getTemplateByAction(ComponentType.PERMALINK);
+        } catch (Exception e) {
+            log.error("Error getting weblog page for action 'permalink'", e);
+        }
+        return null;
+    }
+
+    private ThemeTemplate findDefaultTemplate(Weblog weblog) {
+        try {
+            return weblog.getTheme().getDefaultTemplate();
+        } catch (Exception e) {
+            log.error("Error getting default page for weblog = " + weblog.getHandle(), e);
+        }
+        return null;
+    }
+
+    /**
+     * Validate the request against the selected template.
+     */
+    private boolean isInvalidRequest(WeblogPageRequest pageRequest, 
+                                     ThemeTemplate page,
+                                     boolean isSiteWide) {
+        
+        // Hidden pages can't be accessed directly
+        if (pageRequest.getWeblogPageName() != null && page.isHidden()) {
+            return true;
+        }
+        
+        // Locale view only if enabled
+        if (pageRequest.getLocale() != null 
+                && !pageRequest.getWeblog().isEnableMultiLang()) {
+            return true;
+        }
+        
+        // Validate permalink requests
+        if (pageRequest.getWeblogAnchor() != null) {
+            return isInvalidPermalinkRequest(pageRequest);
+        }
+        
+        // Validate category requests
+        if (pageRequest.getWeblogCategoryName() != null 
+                && pageRequest.getWeblogCategory() == null) {
+            return true;
+        }
+        
+        // Validate tag requests
+        if (pageRequest.getTags() != null && !pageRequest.getTags().isEmpty()) {
+            return isInvalidTagRequest(pageRequest, isSiteWide);
+        }
+        
+        return false;
+    }
+
+    private boolean isInvalidPermalinkRequest(WeblogPageRequest pageRequest) {
+        WeblogEntry entry = pageRequest.getWeblogEntry();
+        
+        if (entry == null) {
+            return true;
+        }
+        
+        if (pageRequest.getLocale() != null 
+                && !entry.getLocale().startsWith(pageRequest.getLocale())) {
+            return true;
+        }
+        
+        if (!entry.isPublished()) {
+            return true;
+        }
+        
+        if (new Date().before(entry.getPubTime())) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    private boolean isInvalidTagRequest(WeblogPageRequest pageRequest, boolean isSiteWide) {
+        try {
+            WeblogEntryManager wmgr = WebloggerFactory.getWeblogger()
+                    .getWeblogEntryManager();
+            return !wmgr.getTagComboExists(pageRequest.getTags(),
+                    isSiteWide ? null : pageRequest.getWeblog());
+        } catch (WebloggerException ex) {
+            return true;
+        }
+    }
+
+    /**
+     * Determine the content type for the response.
+     */
+    private String determineContentType(ThemeTemplate page) {
+        if (StringUtils.isNotEmpty(page.getOutputContentType())) {
+            return page.getOutputContentType() + "; charset=utf-8";
+        }
+
+        final String defaultContentType = "text/html; charset=utf-8";
+        
+        if (page.getLink() == null) {
+            return defaultContentType;
+        }
+
+        String mimeType = RollerContext.getServletContext().getMimeType(page.getLink());
+        if (mimeType != null) {
+            return mimeType + "; charset=utf-8";
+        }
+        
+        return defaultContentType;
+    }
+
+    /**
+     * Build the rendering model with all necessary data.
+     */
+    private HashMap<String, Object> buildRenderingModel(HttpServletRequest request,
+                                                         HttpServletResponse response,
+                                                         WeblogPageRequest pageRequest) {
         HashMap<String, Object> model = new HashMap<>();
+        
         try {
             PageContext pageContext = JspFactory.getDefaultFactory()
                     .getPageContext(this, request, response, "", false,
@@ -453,10 +554,7 @@ public class PageServlet extends HttpServlet {
             initData.put("requestParameters", request.getParameterMap());
             initData.put("parsedRequest", pageRequest);
             initData.put("pageContext", pageContext);
-
-            // define url strategy
-            initData.put("urlStrategy", WebloggerFactory.getWeblogger()
-                    .getUrlStrategy());
+            initData.put("urlStrategy", WebloggerFactory.getWeblogger().getUrlStrategy());
 
             // if this was a comment posting, check for comment form
             WeblogEntryCommentForm commentForm = (WeblogEntryCommentForm) request
@@ -466,94 +564,86 @@ public class PageServlet extends HttpServlet {
             }
 
             // Load models for pages
-            String pageModels = WebloggerConfig
-                    .getProperty("rendering.pageModels");
+            String pageModels = WebloggerConfig.getProperty("rendering.pageModels");
             ModelLoader.loadModels(pageModels, model, initData, true);
+            
             // Load special models for site-wide blog
-            if (WebloggerRuntimeConfig.isSiteWideWeblog(weblog.getHandle())) {
-                String siteModels = WebloggerConfig
-                        .getProperty("rendering.siteModels");
+            if (WebloggerRuntimeConfig.isSiteWideWeblog(pageRequest.getWeblog().getHandle())) {
+                String siteModels = WebloggerConfig.getProperty("rendering.siteModels");
                 ModelLoader.loadModels(siteModels, model, initData, true);
             }
 
         } catch (WebloggerException ex) {
             log.error("Error loading model objects for page", ex);
-
-            if (!response.isCommitted()) {
-                response.reset();
-            }
-            response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
-            return;
+            return null;
         }
+        
+        return model;
+    }
 
-        // lookup Renderer we are going to use
+    /**
+     * Render the content using the appropriate renderer.
+     */
+    private CachedContent renderContent(ThemeTemplate page,
+                                        WeblogPageRequest pageRequest,
+                                        HashMap<String, Object> model,
+                                        String contentType) {
+        
+        // Lookup renderer
         Renderer renderer;
         try {
             log.debug("Looking up renderer");
-            renderer = RendererManager.getRenderer(page,
-                    pageRequest.getDeviceType());
+            renderer = RendererManager.getRenderer(page, pageRequest.getDeviceType());
         } catch (Exception e) {
-            // nobody wants to render my content :(
             log.error("Couldn't find renderer for page " + page.getId(), e);
-
-            if (!response.isCommitted()) {
-                response.reset();
-            }
-            response.sendError(HttpServletResponse.SC_NOT_FOUND);
-            return;
+            return null;
         }
 
-        // render content
+        // Render content
         CachedContent rendererOutput = new CachedContent(
                 RollerConstants.TWENTYFOUR_KB_IN_BYTES, contentType);
         try {
             log.debug("Doing rendering");
             renderer.render(model, rendererOutput.getCachedWriter());
-
-            // flush rendered output and close
             rendererOutput.flush();
             rendererOutput.close();
         } catch (Exception e) {
-            // bummer, error during rendering
             log.error("Error during rendering for page " + page.getId(), e);
+            return null;
+        }
+        
+        return rendererOutput;
+    }
 
-            if (!response.isCommitted()) {
-                response.reset();
-            }
-            response.sendError(HttpServletResponse.SC_NOT_FOUND);
+    /**
+     * Cache the rendered content if appropriate.
+     */
+    private void cacheRenderedContent(HttpServletRequest request,
+                                      WeblogPageRequest pageRequest,
+                                      String cacheKey,
+                                      CachedContent rendererOutput,
+                                      boolean isSiteWide) {
+        
+        if ((this.excludeOwnerPages && pageRequest.isLoggedIn())
+                || request.getAttribute("skipCache") != null) {
+            log.debug("SKIPPED " + cacheKey);
             return;
         }
 
-        // post rendering process
-        // flush rendered content to response
-        log.debug("Flushing response output");
-        response.setContentType(contentType);
-        response.setContentLength(rendererOutput.getContent().length);
-        response.getOutputStream().write(rendererOutput.getContent());
-
-        // cache rendered content. only cache if user is not logged in?
-        if ((!this.excludeOwnerPages || !pageRequest.isLoggedIn())
-                && request.getAttribute("skipCache") == null) {
-            log.debug("PUT " + cacheKey);
-
-            // put it in the right cache
-            if (isSiteWide) {
-                siteWideCache.put(cacheKey, rendererOutput);
-            } else {
-                weblogPageCache.put(cacheKey, rendererOutput);
-            }
+        log.debug("PUT " + cacheKey);
+        
+        if (isSiteWide) {
+            siteWideCache.put(cacheKey, rendererOutput);
         } else {
-            log.debug("SKIPPED " + cacheKey);
+            weblogPageCache.put(cacheKey, rendererOutput);
         }
-
-        log.debug("Exiting");
     }
 
     /**
      * Handle POST requests.
      * 
      * We have this here because the comment servlet actually forwards some of
-     * its requests on to us to render some pages with cusom messaging. We may
+     * its requests on to us to render some pages with custom messaging. We may
      * want to revisit this approach in the future and see if we can do this in
      * a different way, but for now this is the easy way.
      */
@@ -572,7 +662,6 @@ public class PageServlet extends HttpServlet {
      * Notify the hit tracker that it has an incoming page hit.
      */
     private void processHit(Weblog weblog) {
-
         HitCountQueue counter = HitCountQueue.getInstance();
         counter.processHit(weblog);
     }
@@ -587,10 +676,6 @@ public class PageServlet extends HttpServlet {
 
         log.debug("processing referrer for " + request.getRequestURI());
 
-        // bleh! because ref processing does a flush it will close
-        // our hibernate session and cause lazy init exceptions on
-        // objects we have fetched, so we need to use a separate
-        // page request object for this
         WeblogPageRequest pageRequest;
         try {
             pageRequest = new WeblogPageRequest(request);
@@ -598,80 +683,111 @@ public class PageServlet extends HttpServlet {
             return false;
         }
 
-        // if this came from site-wide frontpage then skip it
-        if (WebloggerRuntimeConfig.isSiteWideWeblog(pageRequest
-                .getWeblogHandle())) {
+        // Skip site-wide frontpage
+        if (WebloggerRuntimeConfig.isSiteWideWeblog(pageRequest.getWeblogHandle())) {
             return false;
         }
 
-        // if this came from a robot then don't process it
-        if (robotPattern != null) {
-            String userAgent = request.getHeader("User-Agent");
-            if (userAgent != null && userAgent.length() > 0
-                    && robotPattern.matcher(userAgent).matches()) {
-                log.debug("skipping referrer from robot");
-                return false;
-            }
+        // Skip robots
+        if (isRobotRequest(request)) {
+            log.debug("skipping referrer from robot");
+            return false;
         }
 
-        String referrerUrl = null;
-        String[] schemes = {"http", "https"};
-        UrlValidator urlValidator = new UrlValidator(schemes);
-        if (urlValidator.isValid(request.getHeader("Referer"))) {
-            referrerUrl = request.getHeader("Referer");
-        }
+        String referrerUrl = extractReferrerUrl(request);
         log.debug("referrer = " + referrerUrl);
 
-        StringBuffer reqsb = request.getRequestURL();
-        if (request.getQueryString() != null) {
-            reqsb.append("?");
-            reqsb.append(request.getQueryString());
-        }
-        String requestUrl = reqsb.toString();
+        String requestUrl = buildRequestUrl(request);
 
-        // if this came from persons own blog then don't process it
-        String selfSiteFragment = "/" + pageRequest.getWeblogHandle();
-        if (referrerUrl != null && referrerUrl.contains(selfSiteFragment)) {
+        // Skip self-referrals
+        if (isSelfReferral(pageRequest, referrerUrl)) {
             log.debug("skipping referrer from own blog");
             return false;
         }
 
-        // validate the referrer
-        if (pageRequest.getWeblogHandle() != null) {
+        // Validate referrer
+        return validateReferrer(pageRequest, referrerUrl, requestUrl);
+    }
 
-            // Base page URLs, with and without www.
-            String basePageUrlWWW = WebloggerRuntimeConfig
-                    .getAbsoluteContextURL()
-                    + "/"
-                    + pageRequest.getWeblogHandle();
-            String basePageUrl = basePageUrlWWW;
-            if (basePageUrlWWW.startsWith("http://www.")) {
-                // chop off the http://www.
-                basePageUrl = "http://" + basePageUrlWWW.substring(11);
+    private boolean isRobotRequest(HttpServletRequest request) {
+        if (robotPattern == null) {
+            return false;
+        }
+        
+        String userAgent = request.getHeader("User-Agent");
+        return userAgent != null && userAgent.length() > 0
+                && robotPattern.matcher(userAgent).matches();
+    }
+
+    private String extractReferrerUrl(HttpServletRequest request) {
+        String[] schemes = {"http", "https"};
+        UrlValidator urlValidator = new UrlValidator(schemes);
+        String referer = request.getHeader("Referer");
+        
+        if (urlValidator.isValid(referer)) {
+            return referer;
+        }
+        return null;
+    }
+
+    private String buildRequestUrl(HttpServletRequest request) {
+        StringBuffer reqsb = request.getRequestURL();
+        if (request.getQueryString() != null) {
+            reqsb.append("?").append(request.getQueryString());
+        }
+        return reqsb.toString();
+    }
+
+    private boolean isSelfReferral(WeblogPageRequest pageRequest, String referrerUrl) {
+        if (referrerUrl == null) {
+            return false;
+        }
+        
+        String selfSiteFragment = "/" + pageRequest.getWeblogHandle();
+        return referrerUrl.contains(selfSiteFragment);
+    }
+
+    private boolean validateReferrer(WeblogPageRequest pageRequest, 
+                                     String referrerUrl, 
+                                     String requestUrl) {
+        
+        if (pageRequest.getWeblogHandle() == null) {
+            return false;
+        }
+
+        String basePageUrlWWW = WebloggerRuntimeConfig.getAbsoluteContextURL()
+                + "/" + pageRequest.getWeblogHandle();
+        String basePageUrl = basePageUrlWWW;
+        
+        if (basePageUrlWWW.startsWith("http://www.")) {
+            basePageUrl = "http://" + basePageUrlWWW.substring(11);
+        }
+
+        // Ignore referrers from user's own blog
+        if (referrerUrl != null
+                && (referrerUrl.startsWith(basePageUrl) 
+                    || referrerUrl.startsWith(basePageUrlWWW))) {
+            log.debug("Ignoring referer = " + referrerUrl);
+            return false;
+        }
+
+        // Validate against banned words
+        if (referrerUrl != null) {
+            int lastSlash = requestUrl.indexOf('/', 8);
+            if (lastSlash == -1) {
+                lastSlash = requestUrl.length();
             }
+            String requestSite = requestUrl.substring(0, lastSlash);
 
-            // ignore referrers coming from users own blog
-            if (referrerUrl == null
-                    || (!referrerUrl.startsWith(basePageUrl) && !referrerUrl
-                            .startsWith(basePageUrlWWW))) {
-
-                // validate the referrer
-                if (referrerUrl != null) {
-                    // treat editor referral as direct
-                    int lastSlash = requestUrl.indexOf('/', 8);
-                    if (lastSlash == -1) {
-                        lastSlash = requestUrl.length();
-                    }
-                    String requestSite = requestUrl.substring(0, lastSlash);
-
-                    return !(referrerUrl.startsWith(requestSite)
-                            && referrerUrl.indexOf(".rol") >= requestSite.length())
-                            && BannedwordslistChecker.checkReferrer(pageRequest.getWeblog(), referrerUrl);
-                }
-            } else {
-                log.debug("Ignoring referer = " + referrerUrl);
+            boolean isEditorReferral = referrerUrl.startsWith(requestSite)
+                    && referrerUrl.indexOf(".rol") >= requestSite.length();
+            
+            if (isEditorReferral) {
                 return false;
             }
+            
+            return BannedwordslistChecker.checkReferrer(
+                    pageRequest.getWeblog(), referrerUrl);
         }
 
         return false;
