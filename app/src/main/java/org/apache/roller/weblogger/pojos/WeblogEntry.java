@@ -357,44 +357,33 @@ public class WeblogEntry implements Serializable {
     }
     
     public String findEntryAttribute(String name) {
-        if (getEntryAttributes() == null) {
-            return null;
-        }
-        
-        for (WeblogEntryAttribute att : getEntryAttributes()) {
-            if (name.equals(att.getName())) {
-                return att.getValue();
+        if (getEntryAttributes() != null) {
+            for (WeblogEntryAttribute att : getEntryAttributes()) {
+                if (name.equals(att.getName())) {
+                    return att.getValue();
+                }
             }
         }
         return null;
     }
         
     public void putEntryAttribute(String name, String value) throws Exception {
-        WeblogEntryAttribute att = findAttributeByName(name);
-        
+        WeblogEntryAttribute att = null;
+        for (WeblogEntryAttribute o : getEntryAttributes()) {
+            if (name.equals(o.getName())) {
+                att = o; 
+                break;
+            }
+        }
         if (att == null) {
-            att = createNewAttribute(name, value);
+            att = new WeblogEntryAttribute();
+            att.setEntry(this);
+            att.setName(name);
+            att.setValue(value);
             getEntryAttributes().add(att);
         } else {
             att.setValue(value);
         }
-    }
-
-    private WeblogEntryAttribute findAttributeByName(String name) {
-        for (WeblogEntryAttribute o : getEntryAttributes()) {
-            if (name.equals(o.getName())) {
-                return o;
-            }
-        }
-        return null;
-    }
-
-    private WeblogEntryAttribute createNewAttribute(String name, String value) {
-        WeblogEntryAttribute att = new WeblogEntryAttribute();
-        att.setEntry(this);
-        att.setName(name);
-        att.setValue(value);
-        return att;
     }
     
     //-------------------------------------------------------------------------
@@ -554,43 +543,27 @@ public class WeblogEntry implements Serializable {
      * @throws WebloggerException
      */
     public void addTag(String name) throws WebloggerException {
-        Locale localeObject = getLocaleForNormalization();
+        Locale localeObject = getWebsite() != null ? getWebsite().getLocaleInstance() : Locale.getDefault();
         name = Utilities.normalizeTag(name, localeObject);
-        
         if (name.length() == 0) {
             return;
         }
         
-        if (tagAlreadyExists(name)) {
-            return;
-        }
-
-        WeblogEntryTag tag = createTag(name);
-        tagSet.add(tag);
-        addedTags.add(tag);
-    }
-
-    private Locale getLocaleForNormalization() {
-        return getWebsite() != null ? getWebsite().getLocaleInstance() : Locale.getDefault();
-    }
-
-    private boolean tagAlreadyExists(String name) {
         for (WeblogEntryTag tag : getTags()) {
             if (tag.getName().equals(name)) {
-                return true;
+                return;
             }
         }
-        return false;
-    }
 
-    private WeblogEntryTag createTag(String name) {
         WeblogEntryTag tag = new WeblogEntryTag();
         tag.setName(name);
         tag.setCreatorUserName(getCreatorUserName());
         tag.setWeblog(getWebsite());
         tag.setWeblogEntry(this);
         tag.setTime(getUpdateTime());
-        return tag;
+        tagSet.add(tag);
+        
+        addedTags.add(tag);
     }
 
     public Set<WeblogEntryTag> getAddedTags() {
@@ -606,11 +579,9 @@ public class WeblogEntry implements Serializable {
         // Sort by name
         Set<WeblogEntryTag> tmp = new TreeSet<>(new WeblogEntryTagComparator());
         tmp.addAll(getTags());
-        
         for (WeblogEntryTag entryTag : tmp) {
             sb.append(entryTag.getName()).append(" ");
         }
-        
         if (sb.length() > 0) {
             sb.deleteCharAt(sb.length() - 1);
         }
@@ -620,36 +591,24 @@ public class WeblogEntry implements Serializable {
 
     public void setTagsAsString(String tags) throws WebloggerException {
         if (StringUtils.isEmpty(tags)) {
-            clearAllTags();
+            removedTags.addAll(tagSet);
+            tagSet.clear();
             return;
         }
 
         List<String> updatedTags = Utilities.splitStringAsTags(tags);
-        Set<String> newTags = normalizeTagList(updatedTags);
-
-        removeObsoleteTags(newTags);
-        addNewTags(newTags);
-    }
-
-    private void clearAllTags() {
-        removedTags.addAll(tagSet);
-        tagSet.clear();
-    }
-
-    private Set<String> normalizeTagList(List<String> updatedTags) {
         Set<String> newTags = new HashSet<>(updatedTags.size());
-        Locale localeObject = getLocaleForNormalization();
+        Locale localeObject = getWebsite() != null ? getWebsite().getLocaleInstance() : Locale.getDefault();
 
         for (String name : updatedTags) {
             newTags.add(Utilities.normalizeTag(name, localeObject));
         }
-        return newTags;
-    }
 
-    private void removeObsoleteTags(Set<String> newTags) {
+        // remove old ones no longer passed.
         for (Iterator<WeblogEntryTag> it = tagSet.iterator(); it.hasNext();) {
             WeblogEntryTag tag = it.next();
             if (!newTags.contains(tag.getName())) {
+                // tag no longer listed in UI, needs removal from DB
                 removedTags.add(tag);
                 it.remove();
             } else {
@@ -657,9 +616,7 @@ public class WeblogEntry implements Serializable {
                 newTags.remove(tag.getName());
             }
         }
-    }
 
-    private void addNewTags(Set<String> newTags) throws WebloggerException {
         for (String newTag : newTags) {
             addTag(newTag);
         }
@@ -673,55 +630,35 @@ public class WeblogEntry implements Serializable {
      * site-wide configs.
      */
     public boolean getCommentsStillAllowed() {
-        if (!areSiteCommentsEnabled()) {
+        if (!WebloggerRuntimeConfig.getBooleanProperty("users.comments.enabled")) {
             return false;
         }
-        if (!areWeblogCommentsEnabled()) {
+        if (getWebsite().getAllowComments() != null && !getWebsite().getAllowComments()) {
             return false;
         }
-        if (!areEntryCommentsEnabled()) {
+        if (getAllowComments() != null && !getAllowComments()) {
             return false;
         }
-        return isWithinCommentPeriod();
-    }
-
-    private boolean areSiteCommentsEnabled() {
-        return WebloggerRuntimeConfig.getBooleanProperty("users.comments.enabled");
-    }
-
-    private boolean areWeblogCommentsEnabled() {
-        return getWebsite().getAllowComments() == null || getWebsite().getAllowComments();
-    }
-
-    private boolean areEntryCommentsEnabled() {
-        return getAllowComments() == null || getAllowComments();
-    }
-
-    private boolean isWithinCommentPeriod() {
-        if (getCommentDays() == null || getCommentDays() == 0) {
-            return true; // No time limit
-        }
-
-        Date effectivePubTime = getEffectivePubTime();
-        Date expiryDate = calculateCommentExpiryDate(effectivePubTime);
         
-        return new Date().before(expiryDate);
-    }
-
-    private Date getEffectivePubTime() {
+        if (getCommentDays() == null || getCommentDays() == 0) {
+            return true;
+        }
+        
         // Use pubtime for calculating when comments expire, but
         // if pubtime isn't set (like for drafts) then use updatetime
         Date inPubTime = getPubTime();
-        return (inPubTime != null) ? inPubTime : getUpdateTime();
-    }
-
-    private Date calculateCommentExpiryDate(Date fromDate) {
+        if (inPubTime == null) {
+            inPubTime = getUpdateTime();
+        }
+        
         Calendar expireCal = Calendar.getInstance(getWebsite().getLocaleInstance());
-        expireCal.setTime(fromDate);
+        expireCal.setTime(inPubTime);
         expireCal.add(Calendar.DATE, getCommentDays());
-        return expireCal.getTime();
+        Date expireDay = expireCal.getTime();
+        
+        return new Date().before(expireDay);
     }
-
+    
     public void setCommentsStillAllowed(boolean ignored) {
         // no-op
     }
@@ -833,7 +770,7 @@ public class WeblogEntry implements Serializable {
      * @return String
      */
     public String getDisplayTitle() {
-        if (StringUtils.isBlank(getTitle())) {
+        if (getTitle() == null || getTitle().isBlank()) {
             return StringUtils.left(Utilities.removeHTML(getText()), RollerConstants.TEXTWIDTH_255);
         }
         return Utilities.removeHTML(getTitle());
@@ -864,48 +801,36 @@ public class WeblogEntry implements Serializable {
     
     /** Create anchor for weblog entry, based on title or text */
     public String createAnchorBase() {
-        String base = extractAnchorFromTitleOrText();
         
-        if (StringUtils.isNotEmpty(base)) {
-            base = buildAnchorFromWords(base);
+        // Use title (minus non-alphanumeric characters)
+        String base = null;
+        if (!StringUtils.isEmpty(getTitle())) {
+            base = Utilities.replaceNonAlphanumeric(getTitle(), ' ').trim();    
+        }
+        // If we still have no base, then try text (minus non-alphanumerics)
+        if (StringUtils.isEmpty(base) && !StringUtils.isEmpty(getText())) {
+            base = Utilities.replaceNonAlphanumeric(getText(), ' ').trim();  
+        }
+        
+        if (!StringUtils.isEmpty(base)) {
+            // Use only the first 4 words
+            StringTokenizer toker = new StringTokenizer(base);
+            String tmp = null;
+            int count = 0;
+            while (toker.hasMoreTokens() && count < 5) {
+                String s = toker.nextToken();
+                s = s.toLowerCase();
+                tmp = (tmp == null) ? s : tmp + TITLE_SEPARATOR + s;
+                count++;
+            }
+            base = tmp;
         } else {
-            // No title or text, use date in YYYYMMDD format
+            // No title or text, so instead we will use the items date
+            // in YYYYMMDD format as the base anchor
             base = DateUtil.format8chars(getPubTime());
         }
         
         return base;
-    }
-
-    private String extractAnchorFromTitleOrText() {
-        // Try title first (minus non-alphanumeric characters)
-        if (StringUtils.isNotEmpty(getTitle())) {
-            return Utilities.replaceNonAlphanumeric(getTitle(), ' ').trim();
-        }
-        
-        // Fall back to text (minus non-alphanumerics)
-        if (StringUtils.isNotEmpty(getText())) {
-            return Utilities.replaceNonAlphanumeric(getText(), ' ').trim();
-        }
-        
-        return null;
-    }
-
-    private String buildAnchorFromWords(String base) {
-        // Use only the first 4 words
-        StringTokenizer toker = new StringTokenizer(base);
-        StringBuilder result = new StringBuilder();
-        int count = 0;
-        
-        while (toker.hasMoreTokens() && count < 5) {
-            String word = toker.nextToken().toLowerCase();
-            if (result.length() > 0) {
-                result.append(TITLE_SEPARATOR);
-            }
-            result.append(word);
-            count++;
-        }
-        
-        return result.toString();
     }
     
     /**
@@ -979,34 +904,29 @@ public class WeblogEntry implements Serializable {
      * Determine if the specified user has permissions to edit this entry.
      */
     public boolean hasWritePermissions(User user) throws WebloggerException {
-        if (userHasGlobalAdminPermission(user)) {
+        
+        // global admins can hack whatever they want
+        GlobalPermission adminPerm = 
+            new GlobalPermission(Collections.singletonList(GlobalPermission.ADMIN));
+        boolean hasAdmin = WebloggerFactory.getWeblogger().getUserManager()
+            .checkPermission(adminPerm, user); 
+        if (hasAdmin) {
             return true;
         }
         
-        WeblogPermission perm = getUserWeblogPermission(user);
-        return userCanEditEntry(perm);
-    }
-
-    private boolean userHasGlobalAdminPermission(User user) throws WebloggerException {
-        GlobalPermission adminPerm = new GlobalPermission(
-                Collections.singletonList(GlobalPermission.ADMIN));
-        return WebloggerFactory.getWeblogger().getUserManager()
-                .checkPermission(adminPerm, user);
-    }
-
-    private WeblogPermission getUserWeblogPermission(User user) throws WebloggerException {
+        WeblogPermission perm;
         try {
+            // if user is an author then post status defaults to PUBLISHED, otherwise PENDING
             UserManager umgr = WebloggerFactory.getWeblogger().getUserManager();
-            return umgr.getWeblogPermission(getWebsite(), user);
+            perm = umgr.getWeblogPermission(getWebsite(), user);
+            
         } catch (WebloggerException ex) {
+            // security interceptor should ensure this never happens
             mLogger.error("ERROR retrieving user's permission", ex);
-            throw ex;
+            return false;
         }
-    }
 
-    private boolean userCanEditEntry(WeblogPermission perm) {
-        boolean author = perm.hasAction(WeblogPermission.POST) 
-                || perm.hasAction(WeblogPermission.ADMIN);
+        boolean author = perm.hasAction(WeblogPermission.POST) || perm.hasAction(WeblogPermission.ADMIN);
         boolean limited = !author && perm.hasAction(WeblogPermission.EDIT_DRAFT);
         
         return author || (limited && (status == PubStatus.DRAFT || status == PubStatus.PENDING));
@@ -1016,45 +936,31 @@ public class WeblogEntry implements Serializable {
      * Transform string based on plugins enabled for this weblog entry.
      */
     private String render(String str) {
-        if (str == null) {
-            return HTMLSanitizer.conditionallySanitize(null);
-        }
-
         String ret = str;
         mLogger.debug("Applying page plugins to string");
-        
         Map<String, WeblogEntryPlugin> inPlugins = getWebsite().getInitializedPlugins();
-        if (inPlugins != null) {
-            ret = applyPlugins(ret, inPlugins);
-        }
-        
-        return HTMLSanitizer.conditionallySanitize(ret);
-    }
-
-    private String applyPlugins(String content, Map<String, WeblogEntryPlugin> inPlugins) {
-        List<String> entryPlugins = getPluginsList();
-        
-        // If no Entry plugins, skip processing
-        if (entryPlugins == null || entryPlugins.isEmpty()) {
-            return content;
-        }
-
-        String result = content;
-        for (Map.Entry<String, WeblogEntryPlugin> entry : inPlugins.entrySet()) {
-            if (entryPlugins.contains(entry.getKey())) {
-                result = applyPlugin(result, entry.getValue());
+        if (str != null && inPlugins != null) {
+            List<String> entryPlugins = getPluginsList();
+            
+            // if no Entry plugins, don't bother looping.
+            if (entryPlugins != null && !entryPlugins.isEmpty()) {
+                
+                // now loop over mPagePlugins, matching
+                // against Entry plugins (by name):
+                // where a match is found render Plugin.
+                for (Map.Entry<String, WeblogEntryPlugin> entry : inPlugins.entrySet()) {
+                    if (entryPlugins.contains(entry.getKey())) {
+                        WeblogEntryPlugin pagePlugin = entry.getValue();
+                        try {
+                            ret = pagePlugin.render(this, ret);
+                        } catch (Exception e) {
+                            mLogger.error("ERROR from plugin: " + pagePlugin.getName(), e);
+                        }
+                    }
+                }
             }
-        }
-        return result;
-    }
-
-    private String applyPlugin(String content, WeblogEntryPlugin plugin) {
-        try {
-            return plugin.render(this, content);
-        } catch (Exception e) {
-            mLogger.error("ERROR from plugin: " + plugin.getName(), e);
-            return content;
-        }
+        } 
+        return HTMLSanitizer.conditionallySanitize(ret);
     }
     
     
@@ -1067,47 +973,37 @@ public class WeblogEntry implements Serializable {
      * empty or null then we assume the caller prefers content over summary.
      */
     public String displayContent(String readMoreLink) {
-        if (isPermalinkContext(readMoreLink)) {
-            return getPermalinkContent();
-        }
-        return getListingContent(readMoreLink);
-    }
-
-    private boolean isPermalinkContext(String readMoreLink) {
-        return readMoreLink == null || readMoreLink.isBlank() || "nil".equals(readMoreLink);
-    }
-
-    private String getPermalinkContent() {
-        // Permalink context: prefer text over summary
-        if (StringUtils.isNotEmpty(getText())) {
-            return getTransformedText();
-        }
-        return getTransformedSummary();
-    }
-
-    private String getListingContent(String readMoreLink) {
-        // Listing context: prefer summary over text, add "read more" if needed
-        if (StringUtils.isNotEmpty(getSummary())) {
-            return getSummaryWithReadMore(readMoreLink);
-        }
-        return getTransformedText();
-    }
-
-    private String getSummaryWithReadMore(String readMoreLink) {
-        String displayContent = getTransformedSummary();
         
-        if (StringUtils.isNotEmpty(getText())) {
-            String readMore = buildReadMoreLink(readMoreLink);
-            displayContent += readMore;
+        String displayContent;
+        
+        if (readMoreLink == null || readMoreLink.isBlank() || "nil".equals(readMoreLink)) {
+            
+            // no readMore link means permalink, so prefer text over summary
+            if (StringUtils.isNotEmpty(this.getText())) {
+                displayContent = this.getTransformedText();
+            } else {
+                displayContent = this.getTransformedSummary();
+            }
+        } else {
+            // not a permalink, so prefer summary over text
+            // include a "read more" link if needed
+            if (StringUtils.isNotEmpty(this.getSummary())) {
+                displayContent = this.getTransformedSummary();
+                if (StringUtils.isNotEmpty(this.getText())) {
+                    // add read more
+                    List<String> args = List.of(readMoreLink);
+                    
+                    // TODO: we need a more appropriate way to get the view locale here
+                    String readMore = I18nMessages.getMessages(getWebsite().getLocaleInstance()).getString("macro.weblog.readMoreLink", args);
+                    
+                    displayContent += readMore;
+                }
+            } else {
+                displayContent = this.getTransformedText();
+            }
         }
         
-        return displayContent;
-    }
-
-    private String buildReadMoreLink(String readMoreLink) {
-        List<String> args = List.of(readMoreLink);
-        return I18nMessages.getMessages(getWebsite().getLocaleInstance())
-                .getString("macro.weblog.readMoreLink", args);
+        return HTMLSanitizer.conditionallySanitize(displayContent);
     }
     
     
