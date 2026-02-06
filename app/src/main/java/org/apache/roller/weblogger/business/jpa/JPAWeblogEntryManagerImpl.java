@@ -684,7 +684,7 @@ public class JPAWeblogEntryManagerImpl implements WeblogEntryManager {
     @Override
     public List<TagStat> getPopularTags(Weblog website, Date startDate, int offset, int limit)
     throws WebloggerException {
-        return getPopularTags(website, startDate, offset, limit);
+        return tagService.getPopularTags(website, startDate, offset, limit);
     }
     
     /**

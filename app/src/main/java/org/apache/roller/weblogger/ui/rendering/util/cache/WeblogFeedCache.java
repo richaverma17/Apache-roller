@@ -21,129 +21,30 @@ package org.apache.roller.weblogger.ui.rendering.util.cache;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Map;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.roller.weblogger.config.WebloggerConfig;
 import org.apache.roller.weblogger.ui.rendering.util.WeblogFeedRequest;
 import org.apache.roller.weblogger.util.Utilities;
-import org.apache.roller.weblogger.util.cache.Cache;
-import org.apache.roller.weblogger.util.cache.CacheManager;
-import org.apache.roller.weblogger.util.cache.LazyExpiringCacheEntry;
 
 
 /**
  * Cache for weblog feed content.
  */
-public final class WeblogFeedCache {
-    
-    private static final Log log = LogFactory.getLog(WeblogFeedCache.class);
+public final class WeblogFeedCache extends AbstractWeblogCache {
     
     // a unique identifier for this cache, this is used as the prefix for
     // roller config properties that apply to this cache
     public static final String CACHE_ID = "cache.weblogfeed";
-    
-    // keep cached content
-    private boolean cacheEnabled = true;
-    private Cache contentCache = null;
     
     // reference to our singleton instance
     private static final WeblogFeedCache singletonInstance = new WeblogFeedCache();
     
     
     private WeblogFeedCache() {
-        
-        cacheEnabled = WebloggerConfig.getBooleanProperty(CACHE_ID+".enabled");
-        
-        Map<String, String> cacheProps = new HashMap<>();
-        cacheProps.put("id", CACHE_ID);
-        
-        Enumeration<Object> allProps = WebloggerConfig.keys();
-        String prop;
-        while(allProps.hasMoreElements()) {
-            prop = (String) allProps.nextElement();
-            
-            // we are only interested in props for this cache
-            if(prop.startsWith(CACHE_ID+".")) {
-                cacheProps.put(prop.substring(CACHE_ID.length()+1), 
-                        WebloggerConfig.getProperty(prop));
-            }
-        }
-        
-        log.info(cacheProps);
-        
-        if(cacheEnabled) {
-            contentCache = CacheManager.constructCache(null, cacheProps);
-        } else {
-            log.warn("Caching has been DISABLED");
-        }
+        initializeCache(CACHE_ID);
     }
     
     
     public static WeblogFeedCache getInstance() {
         return singletonInstance;
-    }
-    
-    
-    public Object get(String key, long lastModified) {
-        
-        if (!cacheEnabled) {
-            return null;
-        }
-        
-        Object entry = null;
-        
-        LazyExpiringCacheEntry lazyEntry =
-                (LazyExpiringCacheEntry) this.contentCache.get(key);
-        if(lazyEntry != null) {
-            entry = lazyEntry.getValue(lastModified);
-            
-            if(entry != null) {
-                log.debug("HIT "+key);
-            } else {
-                log.debug("HIT-EXPIRED "+key);
-            }
-            
-        } else {
-            log.debug("MISS "+key);
-        }
-        
-        return entry;
-    }
-    
-    
-    public void put(String key, Object value) {
-        
-        if (!cacheEnabled) {
-            return;
-        }
-        
-        contentCache.put(key, new LazyExpiringCacheEntry(value));
-        log.debug("PUT "+key);
-    }
-    
-    
-    public void remove(String key) {
-        
-        if (!cacheEnabled) {
-            return;
-        }
-        
-        contentCache.remove(key);
-        log.debug("REMOVE "+key);
-    }
-    
-    
-    public void clear() {
-        
-        if (!cacheEnabled) {
-            return;
-        }
-        
-        contentCache.clear();
-        log.debug("CLEAR");
     }
     
     
