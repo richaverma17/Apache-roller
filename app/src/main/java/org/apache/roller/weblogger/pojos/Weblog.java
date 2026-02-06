@@ -30,15 +30,19 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.roller.weblogger.config.WebloggerRuntimeConfig;
 import org.apache.roller.weblogger.business.BookmarkManager;
-import org.apache.roller.weblogger.business.plugins.PluginManager;
 import org.apache.roller.weblogger.business.Weblogger;
-import org.apache.roller.weblogger.business.themes.ThemeManager;
+// import org.apache.roller.weblogger.business.themes.ThemeManager;
 import org.apache.roller.weblogger.business.WeblogEntryManager;
 import org.apache.roller.weblogger.pojos.WeblogEntry.PubStatus;
 import org.apache.roller.util.UUIDGenerator;
 import org.apache.roller.weblogger.business.UserManager;
 import org.apache.roller.weblogger.util.I18nUtils;
 import org.apache.roller.weblogger.util.Utilities;
+import org.apache.roller.weblogger.business.weblog.WeblogThemeService;
+// import org.apache.roller.weblogger.pojos.WeblogTheme;
+import org.apache.roller.weblogger.business.weblog.WeblogEntryQueryService;
+import org.apache.roller.weblogger.business.weblog.WeblogPluginService;
+
 
 
 /**
@@ -154,16 +158,7 @@ public class Weblog implements Serializable {
      * Get the Theme object in use by this weblog, or null if no theme selected.
      */
     public WeblogTheme getTheme() {
-        try {
-            // let the ThemeManager handle it
-            ThemeManager themeMgr = WebloggerFactory.getWeblogger().getThemeManager();
-            return themeMgr.getTheme(this);
-        } catch (WebloggerException ex) {
-            log.error("Error getting theme for weblog - "+getHandle(), ex);
-        }
-        
-        // TODO: maybe we should return a default theme in this case?
-        return null;
+        return new WeblogThemeService().getTheme(this);
     }
 
     /**
@@ -587,13 +582,7 @@ public class Weblog implements Serializable {
      */
     public Map<String, WeblogEntryPlugin> getInitializedPlugins() {
         if (initializedPlugins == null) {
-            try {
-                Weblogger roller = WebloggerFactory.getWeblogger();
-                PluginManager ppmgr = roller.getPluginManager();
-                initializedPlugins = ppmgr.getWeblogEntryPlugins(this);
-            } catch (Exception e) {
-                log.error("ERROR: initializing plugins");
-            }
+            initializedPlugins = new WeblogPluginService().getInitializedPlugins(this);
         }
         return initializedPlugins;
     }
@@ -604,31 +593,11 @@ public class Weblog implements Serializable {
      * @return Weblog entry specified by anchor
      */
     public WeblogEntry getWeblogEntry(String anchor) {
-        WeblogEntry entry = null;
-        try {
-            Weblogger roller = WebloggerFactory.getWeblogger();
-            WeblogEntryManager wmgr = roller.getWeblogEntryManager();
-            entry = wmgr.getWeblogEntryByAnchor(this, anchor);
-        } catch (WebloggerException e) {
-            log.error("ERROR: getting entry by anchor");
-        }
-        return entry;
+        return new WeblogEntryQueryService().getWeblogEntry(this, anchor);
     }
 
     public WeblogCategory getWeblogCategory(String categoryName) {
-        WeblogCategory category = null;
-        try {
-            Weblogger roller = WebloggerFactory.getWeblogger();
-            WeblogEntryManager wmgr = roller.getWeblogEntryManager();
-            if (categoryName != null && !categoryName.equals("nil")) {
-                category = wmgr.getWeblogCategoryByName(this, categoryName);
-            } else {
-                category = getWeblogCategories().iterator().next();
-            }
-        } catch (WebloggerException e) {
-            log.error("ERROR: fetching category: " + categoryName, e);
-        }
-        return category;
+        return new WeblogEntryQueryService().getWeblogCategory(this, categoryName);
     }
 
     
@@ -639,27 +608,7 @@ public class Weblog implements Serializable {
      * @return List of weblog entry objects.
      */
     public List<WeblogEntry> getRecentWeblogEntries(String cat, int length) {
-        if (cat != null && "nil".equals(cat)) {
-            cat = null;
-        }
-        if (length > MAX_ENTRIES) {
-            length = MAX_ENTRIES;
-        }
-        if (length < 1) {
-            return Collections.emptyList();
-        }
-        try {
-            WeblogEntryManager wmgr = WebloggerFactory.getWeblogger().getWeblogEntryManager();
-            WeblogEntrySearchCriteria wesc = new WeblogEntrySearchCriteria();
-            wesc.setWeblog(this);
-            wesc.setCatName(cat);
-            wesc.setStatus(PubStatus.PUBLISHED);
-            wesc.setMaxResults(length);
-            return wmgr.getWeblogEntries(wesc);
-        } catch (WebloggerException e) {
-            log.error("ERROR: getting recent entries", e);
-        }
-        return Collections.emptyList();
+        return new WeblogEntryQueryService().getRecentWeblogEntries(this , cat, length);
     }
     
     /**
