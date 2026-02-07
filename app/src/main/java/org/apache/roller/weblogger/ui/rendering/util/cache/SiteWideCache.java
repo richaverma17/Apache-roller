@@ -22,13 +22,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Date;
-import java.util.Enumeration;
-import java.util.HashMap;
 import java.util.Map;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.roller.util.RollerConstants;
-import org.apache.roller.weblogger.config.WebloggerConfig;
 import org.apache.roller.weblogger.config.WebloggerRuntimeConfig;
 import org.apache.roller.weblogger.pojos.WeblogBookmark;
 import org.apache.roller.weblogger.pojos.WeblogEntryComment;
@@ -41,26 +36,18 @@ import org.apache.roller.weblogger.pojos.Weblog;
 import org.apache.roller.weblogger.ui.rendering.util.WeblogFeedRequest;
 import org.apache.roller.weblogger.ui.rendering.util.WeblogPageRequest;
 import org.apache.roller.weblogger.util.Utilities;
-import org.apache.roller.weblogger.util.cache.Cache;
 import org.apache.roller.weblogger.util.cache.CacheHandler;
-import org.apache.roller.weblogger.util.cache.CacheManager;
 import org.apache.roller.weblogger.util.cache.ExpiringCacheEntry;
 
 
 /**
  * Cache for site-wide weblog content.
  */
-public final class SiteWideCache implements CacheHandler {
-    
-    private static final Log log = LogFactory.getLog(SiteWideCache.class);
+public final class SiteWideCache extends AbstractWeblogCache implements CacheHandler {
     
     // a unique identifier for this cache, this is used as the prefix for
     // roller config properties that apply to this cache
     public static final String CACHE_ID = "cache.sitewide";
-    
-    // keep cached content
-    private boolean cacheEnabled = true;
-    private Cache contentCache = null;
     
     // keep a cached version of last expired time
     private ExpiringCacheEntry lastUpdateTime = null;
@@ -70,30 +57,8 @@ public final class SiteWideCache implements CacheHandler {
     
     
     private SiteWideCache() {
-        
-        cacheEnabled = WebloggerConfig.getBooleanProperty(CACHE_ID+".enabled");
-        
-        Map<String, String> cacheProps = new HashMap<>();
-        cacheProps.put("id", CACHE_ID);
-        Enumeration<Object> allProps = WebloggerConfig.keys();
-        String prop;
-        while(allProps.hasMoreElements()) {
-            prop = (String) allProps.nextElement();
-            
-            // we are only interested in props for this cache
-            if(prop.startsWith(CACHE_ID+".")) {
-                cacheProps.put(prop.substring(CACHE_ID.length()+1), 
-                        WebloggerConfig.getProperty(prop));
-            }
-        }
-        
-        log.info(cacheProps);
-        
-        if(cacheEnabled) {
-            contentCache = CacheManager.constructCache(this, cacheProps);
-        } else {
-            log.warn("Caching has been DISABLED");
-        }
+        // Pass 'this' as the CacheHandler since this class implements that interface
+        initializeCache(CACHE_ID, this);
     }
     
     
@@ -102,55 +67,10 @@ public final class SiteWideCache implements CacheHandler {
     }
     
     
-    public Object get(String key) {
-        
-        if (!cacheEnabled) {
-            return null;
-        }
-        
-        Object entry = contentCache.get(key);
-        
-        if(entry == null) {
-            log.debug("MISS "+key);
-        } else {
-            log.debug("HIT "+key);
-        }
-        
-        return entry;
-    }
-    
-    
-    public void put(String key, Object value) {
-        
-        if (!cacheEnabled) {
-            return;
-        }
-        
-        contentCache.put(key, value);
-        log.debug("PUT "+key);
-    }
-
-    
-    public void remove(String key) {
-        
-        if (!cacheEnabled) {
-            return;
-        }
-        
-        contentCache.remove(key);
-        log.debug("REMOVE "+key);
-    }
-    
-    
+    @Override
     public void clear() {
-        
-        if (!cacheEnabled) {
-            return;
-        }
-        
-        contentCache.clear();
+        super.clear();
         this.lastUpdateTime = null;
-        log.debug("CLEAR");
     }
     
     
