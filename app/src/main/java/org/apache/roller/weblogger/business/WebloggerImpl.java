@@ -20,12 +20,8 @@ package org.apache.roller.weblogger.business;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.apache.roller.weblogger.WebloggerException;
-import org.apache.roller.weblogger.config.PingConfig;
-import org.apache.xmlrpc.util.SAXParsers;
-import org.xml.sax.SAXNotRecognizedException;
-import org.xml.sax.SAXNotSupportedException;
 
+import org.apache.roller.weblogger.WebloggerException;
 import org.apache.roller.weblogger.business.pings.AutoPingManager;
 import org.apache.roller.weblogger.business.pings.PingQueueManager;
 import org.apache.roller.weblogger.business.pings.PingTargetManager;
@@ -37,12 +33,6 @@ import org.apache.roller.weblogger.business.plugins.PluginManager;
 import org.apache.roller.weblogger.business.runnable.ThreadManager;
 import org.apache.roller.weblogger.business.search.IndexManager;
 import org.apache.roller.weblogger.business.themes.ThemeManager;
-
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParserFactory;
-
-import java.io.IOException;
-import java.util.Properties;
 
 /**
  * The abstract version of the Weblogger implementation.
@@ -65,10 +55,10 @@ public abstract class WebloggerImpl implements Weblogger {
     private final URLStrategy urlStrategy;
 
     // Build/version information
-    private final String version;
-    private final String revision;
-    private final String buildTime;
-    private final String buildUser;
+    private final BuildInfo buildInfo;
+    
+    // Initializer for security and configuration
+    private final WebloggerInitializer initializer;
 
     protected WebloggerImpl(
             PingManagerFacade   pingFacade,
@@ -76,7 +66,7 @@ public abstract class WebloggerImpl implements Weblogger {
             SystemManagerFacade  systemFacade,
             UserManagerFacade    userFacade,
             PlanetFacade         planetFacade,
-            URLStrategy          urlStrategy) throws WebloggerException {
+            URLStrategy          urlStrategy) {
 
         this.pingFacade     = pingFacade;
         this.contentFacade  = contentFacade;
@@ -84,18 +74,8 @@ public abstract class WebloggerImpl implements Weblogger {
         this.userFacade     = userFacade;
         this.planetFacade   = planetFacade;
         this.urlStrategy    = urlStrategy;
-
-        Properties props = new Properties();
-        try {
-            props.load(getClass().getResourceAsStream("/roller-version.properties"));
-        } catch (IOException e) {
-            log.error("roller-version.properties not found", e);
-        }
-
-        version   = props.getProperty("ro.version",   "UNKNOWN");
-        revision  = props.getProperty("ro.revision",  "UNKNOWN");
-        buildTime = props.getProperty("ro.buildTime", "UNKNOWN");
-        buildUser = props.getProperty("ro.buildUser", "UNKNOWN");
+        this.buildInfo      = new BuildInfo();
+        this.initializer    = new WebloggerInitializer();
     }
 
     // ────────────────────────────────────────────────
@@ -103,96 +83,99 @@ public abstract class WebloggerImpl implements Weblogger {
     // ────────────────────────────────────────────────
 
     @Override 
-        public ThreadManager  getThreadManager(){ 
-            return systemFacade.getThreadManager(); 
-        }
+    public ThreadManager getThreadManager() { 
+        return systemFacade.getThreadManager(); 
+    }
 
     @Override 
-        public IndexManager   getIndexManager(){ 
-            return systemFacade.getIndexManager(); 
-        }
+    public IndexManager getIndexManager() { 
+        return systemFacade.getIndexManager(); 
+    }
 
     @Override
-        public ThemeManager   getThemeManager(){ 
-            return systemFacade.getThemeManager(); 
-        }
+    public ThemeManager getThemeManager() { 
+        return systemFacade.getThemeManager(); 
+    }
 
     @Override
-        public PropertiesManager getPropertiesManager(){ 
-            return systemFacade.getPropertiesManager(); 
-        }
+    public PropertiesManager getPropertiesManager() { 
+        return systemFacade.getPropertiesManager(); 
+    }
 
     @Override
-        public PluginManager  getPluginManager(){ 
-            return systemFacade.getPluginManager(); 
-        }
+    public PluginManager getPluginManager() { 
+        return systemFacade.getPluginManager(); 
+    }
 
     @Override
-        public UserManager    getUserManager(){ 
-            return userFacade.getUserManager(); 
-        }
+    public UserManager getUserManager() { 
+        return userFacade.getUserManager(); 
+    }
 
     @Override
-        public OAuthManager   getOAuthManager(){ 
-            return userFacade.getOAuthManager();
-        }
+    public OAuthManager getOAuthManager() { 
+        return userFacade.getOAuthManager();
+    }
 
     @Override
-        public BookmarkManager     getBookmarkManager(){ 
-            return contentFacade.getBookmarkManager(); 
-        }
+    public BookmarkManager getBookmarkManager() { 
+        return contentFacade.getBookmarkManager(); 
+    }
 
     @Override
-        public MediaFileManager    getMediaFileManager(){ 
-            return contentFacade.getMediaFileManager(); 
-        }
+    public MediaFileManager getMediaFileManager() { 
+        return contentFacade.getMediaFileManager(); 
+    }
 
     @Override
-        public FileContentManager  getFileContentManager(){ 
-            return contentFacade.getFileContentManager(); 
-        }   
+    public FileContentManager getFileContentManager() { 
+        return contentFacade.getFileContentManager(); 
+    }   
 
     @Override
-        public WeblogManager       getWeblogManager(){ 
-            return contentFacade.getWeblogManager(); 
-        }
+    public WeblogManager getWeblogManager() { 
+        return contentFacade.getWeblogManager(); 
+    }
 
     @Override
-        public WeblogEntryManager  getWeblogEntryManager(){ 
-            return contentFacade.getWeblogEntryManager(); 
-        }
+    public WeblogEntryManager getWeblogEntryManager() { 
+        return contentFacade.getWeblogEntryManager(); 
+    }
 
     @Override
-        public AutoPingManager    getAutopingManager(){   
-            return pingFacade.getAutoPingManager(); 
-        }
+    public AutoPingManager getAutopingManager() {   
+        return pingFacade.getAutoPingManager(); 
+    }
 
     @Override
-        public PingQueueManager   getPingQueueManager(){ 
-            return pingFacade.getPingQueueManager(); 
-        }
+    public PingQueueManager getPingQueueManager() { 
+        return pingFacade.getPingQueueManager(); 
+    }
+    
     @Override
-        public PingTargetManager  getPingTargetManager(){ 
-            return pingFacade.getPingTargetManager(); 
-        }
+    public PingTargetManager getPingTargetManager() { 
+        return pingFacade.getPingTargetManager(); 
+    }
 
     @Override
-        public FeedFetcher getFeedFetcher(){ 
-            return planetFacade.getFeedFetcher(); 
-        }
+    public FeedFetcher getFeedFetcher() { 
+        return planetFacade.getFeedFetcher(); 
+    }
+    
     @Override
-        public PlanetManager getPlanetManager() { 
-            return planetFacade.getPlanetManager(); 
-        }
+    public PlanetManager getPlanetManager() { 
+        return planetFacade.getPlanetManager(); 
+    }
+    
     @Override
-        public org.apache.roller.planet.business.PlanetURLStrategy getPlanetURLStrategy() {
-            return planetFacade.getPlanetUrlStrategy();
-        }
+    public org.apache.roller.planet.business.PlanetURLStrategy getPlanetURLStrategy() {
+        return planetFacade.getPlanetUrlStrategy();
+    }
 
     @Override
-        public URLStrategy getUrlStrategy() { 
-            return urlStrategy; 
-        }
+    public URLStrategy getUrlStrategy() { 
+        return urlStrategy; 
+    }
 
     // ────────────────────────────────────────────────
     // Lifecycle methods – delegate to facades
@@ -225,24 +208,10 @@ public abstract class WebloggerImpl implements Weblogger {
         planetFacade.initialize();
 
         // Harden XML parser against XXE
-        SAXParserFactory spf = SAXParsers.getSAXParserFactory();
-        try {
-            spf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            spf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
-        } catch (ParserConfigurationException | SAXNotRecognizedException | SAXNotSupportedException e) {
-            String msg = "Unable to disable external DTD support in SAXParser → XML vulnerable to XXE";
-            log.error(msg + (log.isDebugEnabled() ? "" : " (stacktrace in debug)"), e);
-        }
+        initializer.configureXmlSecurity();
 
-        // Ping config (already partially handled in PingFacade)
-        try {
-            if (PingConfig.getDisablePingUsage()) {
-                log.info("Ping usage disabled → removing all auto-ping configurations");
-                getAutopingManager().removeAllAutoPings();
-            }
-        } catch (Exception e) {
-            throw new InitializationException("Error finalizing ping configuration", e);
-        }
+        // Ping configuration
+        initializer.configurePings(getAutopingManager());
 
         try {
             flush();
@@ -272,19 +241,22 @@ public abstract class WebloggerImpl implements Weblogger {
     // ────────────────────────────────────────────────
 
     @Override 
-        public String getVersion(){ 
-            return version; 
-        }
+    public String getVersion() { 
+        return buildInfo.getVersion(); 
+    }
+    
     @Override 
-        public String getRevision(){ 
-            return revision; 
-        }
+    public String getRevision() { 
+        return buildInfo.getRevision(); 
+    }
+    
     @Override 
-        public String getBuildTime(){ 
-            return buildTime; 
-        }
+    public String getBuildTime() { 
+        return buildInfo.getBuildTime(); 
+    }
+    
     @Override 
-        public String getBuildUser(){ 
-            return buildUser; 
-        }
+    public String getBuildUser() { 
+        return buildInfo.getBuildUser(); 
+    }
 }
