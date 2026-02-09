@@ -37,6 +37,7 @@ import org.apache.roller.weblogger.business.plugins.PluginManager;
 import org.apache.roller.weblogger.business.runnable.ThreadManager;
 import org.apache.roller.weblogger.business.search.IndexManager;
 import org.apache.roller.weblogger.business.themes.ThemeManager;
+import org.apache.roller.weblogger.pojos.WeblogAccessProvider;
 
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.parsers.SAXParserFactory;
@@ -257,6 +258,13 @@ public abstract class WebloggerImpl implements Weblogger {
             getBookmarkManager(),
             getUserManager()
         );
+        WeblogAccessProvider.set(new WeblogAccessImpl(
+            weblogService,
+            getThemeManager(),
+            getPluginManager(),
+            getUserManager(),
+            getUrlStrategy()
+        ));
         log.info("WeblogService successfully initialized");
 
         // Harden XML parser against XXE
@@ -297,6 +305,7 @@ public abstract class WebloggerImpl implements Weblogger {
             if (weblogService != null) {
                 weblogService.release();
             }
+            WeblogAccessProvider.clear();
             
             // Shutdown facades
             systemFacade.shutdown();

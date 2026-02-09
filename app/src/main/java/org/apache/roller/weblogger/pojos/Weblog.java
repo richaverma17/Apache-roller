@@ -25,17 +25,12 @@ import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.roller.weblogger.WebloggerException;
 import org.apache.roller.weblogger.business.plugins.entry.WeblogEntryPlugin;
-import org.apache.roller.weblogger.business.WebloggerFactory;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.roller.weblogger.config.WebloggerRuntimeConfig;
-import org.apache.roller.weblogger.business.UserManager;
 import org.apache.roller.util.UUIDGenerator;
 import org.apache.roller.weblogger.util.I18nUtils;
 import org.apache.roller.weblogger.util.Utilities;
-import org.apache.roller.weblogger.business.weblog.WeblogThemeService;
-import org.apache.roller.weblogger.business.weblog.WeblogPluginService;
-import org.apache.roller.weblogger.business.WeblogService;
 
 
 /**
@@ -44,9 +39,8 @@ import org.apache.roller.weblogger.business.WeblogService;
  * other objects. Use UserManager to create, fetch, update and retrieve websites.
  *
  * REFACTORED: Service-layer methods that previously called WebloggerFactory directly
- * have been moved to WeblogService. This class now contains only data, utility methods,
- * and delegations to service wrapper classes (WeblogThemeService, WeblogPluginService, etc.)
- * Query methods delegate to WeblogService to avoid cyclic dependencies.
+ * have been moved behind WeblogAccess. This class now contains only data, utility methods,
+ * and delegations to access/services to avoid cyclic dependencies.
  *
  * @author David M Johnson
  */
@@ -153,23 +147,38 @@ public class Weblog implements Serializable {
     } 
     
     //------------------------------------------------------- Service wrapper methods
-    // These delegate to service classes that don't create cyclic dependencies
+    // These delegate to access/service classes that don't create cyclic dependencies
     
     /**
      * Get the Theme object in use by this weblog, or null if no theme selected.
-     * Delegates to WeblogThemeService.
      */
     public WeblogTheme getTheme() {
-        return new WeblogThemeService().getTheme(this);
+        WeblogAccess access = getAccess();
+        if (access == null) {
+            return null;
+        }
+        try {
+            return access.getTheme(this);
+        } catch (WebloggerException e) {
+            log.error("Error getting theme for weblog", e);
+            return null;
+        }
     }
     
     /**
      * Get initialized plugins for use during rendering process.
-     * Delegates to WeblogPluginService.
      */
     public Map<String, WeblogEntryPlugin> getInitializedPlugins() {
         if (initializedPlugins == null) {
-            initializedPlugins = new WeblogPluginService().getInitializedPlugins(this);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return null;
+            }
+            try {
+                initializedPlugins = access.getInitializedPlugins(this);
+            } catch (WebloggerException e) {
+                log.error("Error initializing plugins for weblog", e);
+            }
         }
         return initializedPlugins;
     }
@@ -180,7 +189,11 @@ public class Weblog implements Serializable {
      */
     public WeblogEntry getWeblogEntry(String anchor) {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getWeblogEntry(this, anchor);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return null;
+            }
+            return access.getWeblogEntry(this, anchor);
         } catch (WebloggerException e) {
             log.error("Error getting weblog entry by anchor: " + anchor, e);
             return null;
@@ -214,7 +227,11 @@ public class Weblog implements Serializable {
             if (cat != null) {
                 log.warn("Category filtering requested but not supported in WeblogService");
             }
-            return WebloggerFactory.getWeblogger().getWeblogService().getRecentEntries(this, length);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return Collections.emptyList();
+            }
+            return access.getRecentEntries(this, length);
         } catch (WebloggerException e) {
             log.error("Error getting recent weblog entries", e);
             return Collections.emptyList();
@@ -240,23 +257,31 @@ public class Weblog implements Serializable {
             tags = List.of(tag);
         }
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getRecentEntriesWithTags(this, tags, length);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return Collections.emptyList();
+            }
+            return access.getRecentEntriesWithTags(this, tags, length);
         } catch (WebloggerException e) {
             log.error("Error getting recent weblog entries by tag", e);
             return Collections.emptyList();
         }
     }
     
-    //------------------------------------------------------- Methods using WeblogService
-    // These were moved from direct WebloggerFactory calls to WeblogService
+    //------------------------------------------------------- Methods using WeblogAccess
+    // These were moved from direct WebloggerFactory calls to WeblogAccess
     
     /**
      * Original creator of website.
-     * NOTE: This method uses WeblogService to avoid cyclic dependency.
+     * NOTE: This method uses WeblogAccess to avoid cyclic dependency.
      */
     public org.apache.roller.weblogger.pojos.User getCreator() {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getCreator(this);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return null;
+            }
+            return access.getCreator(this);
         } catch (Exception e) {
             log.error("ERROR fetching user object for username: " + creator, e);
         }
@@ -265,11 +290,15 @@ public class Weblog implements Serializable {
     
     /**
      * Get up to 100 most recent approved and non-spam comments in weblog.
-     * NOTE: This method uses WeblogService to avoid cyclic dependency.
+     * NOTE: This method uses WeblogAccess to avoid cyclic dependency.
      */
     public List<WeblogEntryComment> getRecentComments(int length) {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getRecentComments(this, length);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return Collections.emptyList();
+            }
+            return access.getRecentComments(this, length);
         } catch (Exception e) {
             log.error("ERROR: getting recent comments", e);
         }
@@ -278,11 +307,15 @@ public class Weblog implements Serializable {
 
     /**
      * Get bookmark folder by name.
-     * NOTE: This method uses WeblogService to avoid cyclic dependency.
+     * NOTE: This method uses WeblogAccess to avoid cyclic dependency.
      */
     public WeblogBookmarkFolder getBookmarkFolder(String folderName) {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getBookmarkFolder(this, folderName);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return null;
+            }
+            return access.getBookmarkFolder(this, folderName);
         } catch (Exception e) {
             log.error("ERROR: fetching folder for weblog", e);
         }
@@ -291,11 +324,15 @@ public class Weblog implements Serializable {
 
     /**
      * Get number of hits counted today.
-     * NOTE: This method uses WeblogService to avoid cyclic dependency.
+     * NOTE: This method uses WeblogAccess to avoid cyclic dependency.
      */
     public int getTodaysHits() {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getTodaysHits(this);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return 0;
+            }
+            return access.getTodaysHits(this);
         } catch (Exception e) {
             log.error("Error getting weblog hit count", e);
         }
@@ -304,11 +341,15 @@ public class Weblog implements Serializable {
 
     /**
      * Get a list of TagStats objects for the most popular tags.
-     * NOTE: This method uses WeblogService to avoid cyclic dependency.
+     * NOTE: This method uses WeblogAccess to avoid cyclic dependency.
      */
     public List<TagStat> getPopularTags(int sinceDays, int length) {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getPopularTags(this, sinceDays, length);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return Collections.emptyList();
+            }
+            return access.getPopularTags(this, sinceDays, length);
         } catch (Exception e) {
             log.error("ERROR: fetching popular tags for weblog " + this.getName(), e);
         }
@@ -317,11 +358,15 @@ public class Weblog implements Serializable {
 
     /**
      * Get comment count for this weblog.
-     * NOTE: This method uses WeblogService to avoid cyclic dependency.
+     * NOTE: This method uses WeblogAccess to avoid cyclic dependency.
      */
     public long getCommentCount() {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getCommentCount(this);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return 0;
+            }
+            return access.getCommentCount(this);
         } catch (Exception e) {
             log.error("Error getting comment count for weblog " + this.getName(), e);
         }
@@ -334,7 +379,11 @@ public class Weblog implements Serializable {
      */
     public long getEntryCount() {
         try {
-            return WebloggerFactory.getWeblogger().getWeblogService().getEntryCount(this);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return 0;
+            }
+            return access.getEntryCount(this);
         } catch (Exception e) {
             log.error("Error getting entry count for weblog " + this.getName(), e);
         }
@@ -666,10 +715,11 @@ public class Weblog implements Serializable {
      */
     public boolean hasUserPermissions(User user, List<String> actions) {
         try {
-            // look for user in website's permissions
-            UserManager umgr = WebloggerFactory.getWeblogger().getUserManager();
-            WeblogPermission userPerms = new WeblogPermission(this, user, actions);
-            return umgr.checkPermission(userPerms, user);
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return false;
+            }
+            return access.hasUserPermissions(this, user, actions);
             
         } catch (WebloggerException ex) {
             // something is going seriously wrong, not much we can do here
@@ -693,14 +743,40 @@ public class Weblog implements Serializable {
      * Get the URL for this weblog.
      */
     public String getURL() {
-        return WebloggerFactory.getWeblogger().getUrlStrategy().getWeblogURL(this, null, false);
+        try {
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return null;
+            }
+            return access.getWeblogURL(this, false);
+        } catch (WebloggerException e) {
+            log.error("Error building weblog URL", e);
+            return null;
+        }
     }
 
     /**
      * Get the absolute URL for this weblog.
      */
     public String getAbsoluteURL() {
-        return WebloggerFactory.getWeblogger().getUrlStrategy().getWeblogURL(this, null, true);
+        try {
+            WeblogAccess access = getAccess();
+            if (access == null) {
+                return null;
+            }
+            return access.getWeblogURL(this, true);
+        } catch (WebloggerException e) {
+            log.error("Error building weblog absolute URL", e);
+            return null;
+        }
+    }
+
+    private static WeblogAccess getAccess() {
+        WeblogAccess access = WeblogAccessProvider.get();
+        if (access == null) {
+            log.error("WeblogAccess not initialized; business tier may not be bootstrapped");
+        }
+        return access;
     }
 
     //------------------------------------------------------- Category Management
