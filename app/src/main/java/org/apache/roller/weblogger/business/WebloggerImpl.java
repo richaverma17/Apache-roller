@@ -20,8 +20,12 @@ package org.apache.roller.weblogger.business;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
 import org.apache.roller.weblogger.WebloggerException;
+import org.apache.roller.weblogger.config.PingConfig;
+import org.apache.xmlrpc.util.SAXParsers;
+import org.xml.sax.SAXNotRecognizedException;
+import org.xml.sax.SAXNotSupportedException;
+
 import org.apache.roller.weblogger.business.pings.AutoPingManager;
 import org.apache.roller.weblogger.business.pings.PingQueueManager;
 import org.apache.roller.weblogger.business.pings.PingTargetManager;
@@ -34,10 +38,18 @@ import org.apache.roller.weblogger.business.runnable.ThreadManager;
 import org.apache.roller.weblogger.business.search.IndexManager;
 import org.apache.roller.weblogger.business.themes.ThemeManager;
 
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParserFactory;
+
+import java.io.IOException;
+import java.util.Properties;
+
 /**
  * The abstract version of the Weblogger implementation.
  * Refactored to use facade pattern for grouping related managers,
  * reducing constructor parameters and improving modularity.
+ * 
+ * UPDATED: Now includes WeblogService to break cyclic dependency with Weblog entity.
  */
 @com.google.inject.Singleton
 public abstract class WebloggerImpl implements Weblogger {
@@ -53,12 +65,15 @@ public abstract class WebloggerImpl implements Weblogger {
 
     // Common URL strategy
     private final URLStrategy urlStrategy;
+    
+    // Weblog service - ADDED to break cyclic dependency
+    private WeblogService weblogService;
 
     // Build/version information
-    private final BuildInfo buildInfo;
-    
-    // Initializer for security and configuration
-    private final WebloggerInitializer initializer;
+    private final String version;
+    private final String revision;
+    private final String buildTime;
+    private final String buildUser;
 
     protected WebloggerImpl(
             PingManagerFacade   pingFacade,
@@ -66,7 +81,7 @@ public abstract class WebloggerImpl implements Weblogger {
             SystemManagerFacade  systemFacade,
             UserManagerFacade    userFacade,
             PlanetFacade         planetFacade,
-            URLStrategy          urlStrategy) {
+            URLStrategy          urlStrategy) throws WebloggerException {
 
         this.pingFacade     = pingFacade;
         this.contentFacade  = contentFacade;
@@ -74,8 +89,18 @@ public abstract class WebloggerImpl implements Weblogger {
         this.userFacade     = userFacade;
         this.planetFacade   = planetFacade;
         this.urlStrategy    = urlStrategy;
-        this.buildInfo      = new BuildInfo();
-        this.initializer    = new WebloggerInitializer();
+
+        Properties props = new Properties();
+        try {
+            props.load(getClass().getResourceAsStream("/roller-version.properties"));
+        } catch (IOException e) {
+            log.error("roller-version.properties not found", e);
+        }
+
+        version   = props.getProperty("ro.version",   "UNKNOWN");
+        revision  = props.getProperty("ro.revision",  "UNKNOWN");
+        buildTime = props.getProperty("ro.buildTime", "UNKNOWN");
+        buildUser = props.getProperty("ro.buildUser", "UNKNOWN");
     }
 
     // ────────────────────────────────────────────────
@@ -83,82 +108,94 @@ public abstract class WebloggerImpl implements Weblogger {
     // ────────────────────────────────────────────────
 
     @Override 
-    public ThreadManager getThreadManager() { 
+    public ThreadManager getThreadManager(){ 
         return systemFacade.getThreadManager(); 
     }
 
     @Override 
-    public IndexManager getIndexManager() { 
+    public IndexManager getIndexManager(){ 
         return systemFacade.getIndexManager(); 
     }
 
     @Override
-    public ThemeManager getThemeManager() { 
+    public ThemeManager getThemeManager(){ 
         return systemFacade.getThemeManager(); 
     }
 
     @Override
-    public PropertiesManager getPropertiesManager() { 
+    public PropertiesManager getPropertiesManager(){ 
         return systemFacade.getPropertiesManager(); 
     }
 
     @Override
-    public PluginManager getPluginManager() { 
+    public PluginManager getPluginManager(){ 
         return systemFacade.getPluginManager(); 
     }
 
     @Override
-    public UserManager getUserManager() { 
+    public UserManager getUserManager(){ 
         return userFacade.getUserManager(); 
     }
 
     @Override
-    public OAuthManager getOAuthManager() { 
+    public OAuthManager getOAuthManager(){ 
         return userFacade.getOAuthManager();
     }
 
     @Override
-    public BookmarkManager getBookmarkManager() { 
+    public BookmarkManager getBookmarkManager(){ 
         return contentFacade.getBookmarkManager(); 
     }
 
     @Override
-    public MediaFileManager getMediaFileManager() { 
+    public MediaFileManager getMediaFileManager(){ 
         return contentFacade.getMediaFileManager(); 
     }
 
     @Override
-    public FileContentManager getFileContentManager() { 
+    public FileContentManager getFileContentManager(){ 
         return contentFacade.getFileContentManager(); 
     }   
 
     @Override
-    public WeblogManager getWeblogManager() { 
+    public WeblogManager getWeblogManager(){ 
         return contentFacade.getWeblogManager(); 
     }
 
     @Override
-    public WeblogEntryManager getWeblogEntryManager() { 
+    public WeblogEntryManager getWeblogEntryManager(){ 
         return contentFacade.getWeblogEntryManager(); 
+    }
+    
+    /**
+     * Get WeblogService associated with this Weblogger instance.
+     * 
+     * ADDED: WeblogService provides a facade for high-level Weblog-related operations,
+     * coordinating calls across multiple managers. This service was introduced
+     * to break the cyclic dependency between Weblog entities and the service layer.
+     */
+    @Override
+    public WeblogService getWeblogService() {
+        return weblogService;
     }
 
     @Override
-    public AutoPingManager getAutopingManager() {   
+    public AutoPingManager getAutopingManager(){   
         return pingFacade.getAutoPingManager(); 
     }
 
     @Override
-    public PingQueueManager getPingQueueManager() { 
+    public PingQueueManager getPingQueueManager(){ 
         return pingFacade.getPingQueueManager(); 
     }
     
     @Override
-    public PingTargetManager getPingTargetManager() { 
+    public PingTargetManager getPingTargetManager(){ 
         return pingFacade.getPingTargetManager(); 
     }
 
     @Override
-    public FeedFetcher getFeedFetcher() { 
+    public FeedFetcher getFeedFetcher(){ 
         return planetFacade.getFeedFetcher(); 
     }
     
@@ -184,6 +221,12 @@ public abstract class WebloggerImpl implements Weblogger {
     @Override
     public void release() {
         try {
+            // ADDED: Release weblog service
+            if (weblogService != null) {
+                weblogService.release();
+            }
+            
+            // Release facades
             pingFacade.release();
             contentFacade.release();
             systemFacade.release();
@@ -207,11 +250,34 @@ public abstract class WebloggerImpl implements Weblogger {
         userFacade.initialize();
         planetFacade.initialize();
 
-        // Harden XML parser against XXE
-        initializer.configureXmlSecurity();
+        // ADDED: Initialize WeblogService after all managers are initialized
+        log.info("Initializing WeblogService");
+        this.weblogService = new WeblogServiceImpl(
+            getWeblogEntryManager(),
+            getBookmarkManager(),
+            getUserManager()
+        );
+        log.info("WeblogService successfully initialized");
 
-        // Ping configuration
-        initializer.configurePings(getAutopingManager());
+        // Harden XML parser against XXE
+        SAXParserFactory spf = SAXParsers.getSAXParserFactory();
+        try {
+            spf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            spf.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        } catch (ParserConfigurationException | SAXNotRecognizedException | SAXNotSupportedException e) {
+            String msg = "Unable to disable external DTD support in SAXParser → XML vulnerable to XXE";
+            log.error(msg + (log.isDebugEnabled() ? "" : " (stacktrace in debug)"), e);
+        }
+
+        // Ping config (already partially handled in PingFacade)
+        try {
+            if (PingConfig.getDisablePingUsage()) {
+                log.info("Ping usage disabled → removing all auto-ping configurations");
+                getAutopingManager().removeAllAutoPings();
+            }
+        } catch (Exception e) {
+            throw new InitializationException("Error finalizing ping configuration", e);
+        }
 
         try {
             flush();
@@ -226,6 +292,13 @@ public abstract class WebloggerImpl implements Weblogger {
     public void shutdown() {
         try {
             HitCountQueue.getInstance().shutdown();
+            
+            // ADDED: Shutdown weblog service
+            if (weblogService != null) {
+                weblogService.release();
+            }
+            
+            // Shutdown facades
             systemFacade.shutdown();
             pingFacade.shutdown();
             contentFacade.shutdown();
@@ -241,22 +314,22 @@ public abstract class WebloggerImpl implements Weblogger {
     // ────────────────────────────────────────────────
 
     @Override 
-    public String getVersion() { 
-        return buildInfo.getVersion(); 
+    public String getVersion(){ 
+        return version; 
     }
     
     @Override 
-    public String getRevision() { 
-        return buildInfo.getRevision(); 
+    public String getRevision(){ 
+        return revision; 
     }
     
     @Override 
-    public String getBuildTime() { 
-        return buildInfo.getBuildTime(); 
+    public String getBuildTime(){ 
+        return buildTime; 
     }
     
     @Override 
-    public String getBuildUser() { 
-        return buildInfo.getBuildUser(); 
+    public String getBuildUser(){ 
+        return buildUser; 
     }
 }

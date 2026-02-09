@@ -30,25 +30,25 @@ import org.apache.roller.weblogger.util.Utilities;
  * Cache for weblog page content.
  */
 public final class WeblogPageCache extends AbstractWeblogCache {
-    
+
     // a unique identifier for this cache, this is used as the prefix for
     // roller config properties that apply to this cache
     public static final String CACHE_ID = "cache.weblogpage";
-    
+
     // reference to our singleton instance
     private static final WeblogPageCache singletonInstance = new WeblogPageCache();
-    
-    
+
+
     private WeblogPageCache() {
         initializeCache(CACHE_ID);
     }
-    
-    
+
+
     public static WeblogPageCache getInstance() {
         return singletonInstance;
     }
-    
-    
+
+
     /**
      * Generate a cache key from a parsed weblog page request.
      * This generates a key of the form ...
@@ -67,32 +67,32 @@ public final class WeblogPageCache extends AbstractWeblogCache {
      *
      */
     public String generateKey(WeblogPageRequest pageRequest) {
-        
+
         StringBuilder key = new StringBuilder(128);
-        
+
         key.append(CACHE_ID).append(':');
         key.append(pageRequest.getWeblogHandle());
-        
+
         if(pageRequest.getWeblogAnchor() != null) {
             // may contain spaces or other bad chars
             String anchor = URLEncoder.encode(pageRequest.getWeblogAnchor(), StandardCharsets.UTF_8);
             key.append("/entry/").append(anchor);
         } else {
-            
+
             if(pageRequest.getWeblogPageName() != null) {
                 key.append("/page/").append(pageRequest.getWeblogPageName());
             }
-            
+
             if(pageRequest.getWeblogDate() != null) {
                 key.append('/').append(pageRequest.getWeblogDate());
             }
-            
+
             if(pageRequest.getWeblogCategoryName() != null) {
                 // may contain spaces or other bad chars
                 String cat = URLEncoder.encode(pageRequest.getWeblogCategoryName(), StandardCharsets.UTF_8);
                 key.append('/').append(cat);
             }
-            
+
             if("tags".equals(pageRequest.getContext())) {
                 if(pageRequest.getTags() != null && !pageRequest.getTags().isEmpty()) {
                     String[] tags = pageRequest.getTags().toArray(new String[0]);
@@ -101,33 +101,33 @@ public final class WeblogPageCache extends AbstractWeblogCache {
                 }
             }
         }
-        
+
         if(pageRequest.getLocale() != null) {
             key.append('/').append(pageRequest.getLocale());
         }
-        
+
         // add page number when applicable
         if(pageRequest.getWeblogAnchor() == null) {
             key.append("/page=").append(pageRequest.getPageNum());
         }
-        
+
         // add login state
         if(pageRequest.getAuthenticUser() != null) {
             key.append("/user=").append(pageRequest.getAuthenticUser());
         }
-        
+
         key.append("/deviceType=").append(pageRequest.getDeviceType().toString());
-        
+
         // we allow for arbitrary query params for custom pages
         if(pageRequest.getWeblogPageName() != null && !pageRequest.getCustomParams().isEmpty()) {
             String queryString = paramsToString(pageRequest.getCustomParams());
-            
+
             key.append("/qp=").append(queryString);
         }
-        
+
         return key.toString();
     }
-    
+
     private String paramsToString(Map<String, String[]> map) {
 
         if (map == null) {

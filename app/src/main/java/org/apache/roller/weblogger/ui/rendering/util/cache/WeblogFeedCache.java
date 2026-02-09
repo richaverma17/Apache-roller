@@ -29,25 +29,25 @@ import org.apache.roller.weblogger.util.Utilities;
  * Cache for weblog feed content.
  */
 public final class WeblogFeedCache extends AbstractWeblogCache {
-    
+
     // a unique identifier for this cache, this is used as the prefix for
     // roller config properties that apply to this cache
     public static final String CACHE_ID = "cache.weblogfeed";
-    
+
     // reference to our singleton instance
     private static final WeblogFeedCache singletonInstance = new WeblogFeedCache();
-    
-    
+
+
     private WeblogFeedCache() {
         initializeCache(CACHE_ID);
     }
-    
-    
+
+
     public static WeblogFeedCache getInstance() {
         return singletonInstance;
     }
-    
-    
+
+
     /**
      * Generate a cache key from a parsed weblog feed request.
      * This generates a key of the form ...
@@ -62,39 +62,39 @@ public final class WeblogFeedCache extends AbstractWeblogCache {
      *
      */
     public String generateKey(WeblogFeedRequest feedRequest) {
-        
+
         StringBuilder key = new StringBuilder(128);
-        
+
         key.append(CACHE_ID).append(':');
         key.append(feedRequest.getWeblogHandle());
-        
+
         key.append('/').append(feedRequest.getType());
         key.append('/').append(feedRequest.getFormat());
-        
+
         if (feedRequest.getTerm() != null) {
             key.append("/search/").append(feedRequest.getTerm());
         }
-        
+
         if(feedRequest.getWeblogCategoryName() != null) {
             String cat = URLEncoder.encode(feedRequest.getWeblogCategoryName(), StandardCharsets.UTF_8);
             key.append('/').append(cat);
         }
-        
+
         if(feedRequest.getTags() != null && !feedRequest.getTags().isEmpty()) {
             String[] tags = feedRequest.getTags().toArray(new String[0]);
             Arrays.sort(tags);
             key.append("/tags/").append(Utilities.stringArrayToString(tags,"+"));
-        }        
-        
+        }
+
         if(feedRequest.getLocale() != null) {
             key.append('/').append(feedRequest.getLocale());
         }
-        
+
         if(feedRequest.isExcerpts()) {
             key.append("/excerpts");
         }
-        
+
         return key.toString();
     }
-    
+
 }

@@ -85,40 +85,7 @@ public class Templates extends UIAction {
                     .getTemplateByLink(getActionWeblog(), getActionWeblog().getTheme().getStylesheet().getLink()));
             }
             setTemplates(pages);
-
-            // build list of action types that may be added
-            Map<ComponentType, String> actionsMap = new EnumMap<>(ComponentType.class);
-            addComponentTypeToMap(actionsMap, ComponentType.CUSTOM);
-
-            if (WeblogTheme.CUSTOM.equals(getActionWeblog().getEditorTheme())) {
-
-                // if the weblog is using a custom theme then determine which
-                // action templates are still available to be created
-                addComponentTypeToMap(actionsMap, ComponentType.PERMALINK);
-                addComponentTypeToMap(actionsMap, ComponentType.SEARCH);
-                addComponentTypeToMap(actionsMap, ComponentType.WEBLOG);
-                addComponentTypeToMap(actionsMap, ComponentType.TAGSINDEX);
-
-                for (WeblogTemplate tmpPage : getTemplates()) {
-                    if (!ComponentType.CUSTOM.equals(tmpPage.getAction())) {
-                        actionsMap.remove(tmpPage.getAction());
-                    }
-                }
-            } else {
-                // Make sure we have an option for the default web page
-                addComponentTypeToMap(actionsMap, ComponentType.WEBLOG);
-                if (getNewTmplAction() == null) {
-                    setNewTmplAction(ComponentType.WEBLOG);
-                }
-                for (WeblogTemplate tmpPage : getTemplates()) {
-                    if (ComponentType.WEBLOG.equals(tmpPage.getAction())) {
-                        actionsMap.remove(ComponentType.WEBLOG);
-                        setNewTmplAction(null);
-                        break;
-                    }
-                }
-            }
-            setAvailableActions(actionsMap);
+            setAvailableActions(buildAvailableActions());
 
         } catch (WebloggerException ex) {
             log.error("Error getting templates for weblog - "
@@ -215,48 +182,26 @@ public class Templates extends UIAction {
             addError("Error deleting template - check Roller logs");
         }
 
-        if (template != null) {
-            try {
-                if (!template.isRequired()
-                    || !WeblogTheme.CUSTOM.equals(getActionWeblog().getEditorTheme())) {
+        if (template == null) {
+            addError("editPages.remove.error");
+            return execute();
+        }
 
-                    WeblogManager mgr = WebloggerFactory.getWeblogger().getWeblogManager();
+        try {
+            if (isRemovable(template)) {
+                WeblogManager mgr = WebloggerFactory.getWeblogger().getWeblogManager();
+                removeAssociatedStylesheetIfNeeded(template, mgr);
 
-                    // if weblog template remove custom style sheet also
-                    if (template.getName().equals(WeblogTemplate.DEFAULT_PAGE)) {
-
-                        ThemeTemplate stylesheet = getActionWeblog().getTheme().getStylesheet();
-
-                        // Delete style sheet if the same name
-                        if (stylesheet != null
-                            && getActionWeblog().getTheme().getStylesheet() != null
-                            && stylesheet.getLink().equals(
-                            getActionWeblog().getTheme().getStylesheet().getLink())) {
-
-                            // Same so OK to delete
-                            WeblogTemplate css =
-                                mgr.getTemplateByLink(getActionWeblog(), stylesheet.getLink());
-
-                            if (css != null) {
-                                mgr.removeTemplate(css);
-                            }
-                        }
-                    }
-
-                    // notify cache
-                    CacheManager.invalidate(template);
-                    mgr.removeTemplate(template);
-                    WebloggerFactory.getWeblogger().flush();
-
-                } else {
-                    addError("editPages.remove.requiredTemplate");
-                }
-
-            } catch (Exception ex) {
-                log.error("Error removing page - " + getRemoveId(), ex);
-                addError("editPages.remove.error");
+                // notify cache
+                CacheManager.invalidate(template);
+                mgr.removeTemplate(template);
+                WebloggerFactory.getWeblogger().flush();
+            } else {
+                addError("editPages.remove.requiredTemplate");
             }
-        } else {
+
+        } catch (Exception ex) {
+            log.error("Error removing page - " + getRemoveId(), ex);
             addError("editPages.remove.error");
         }
 
@@ -298,6 +243,74 @@ public class Templates extends UIAction {
      */
     public boolean isCustomTheme() {
         return (WeblogTheme.CUSTOM.equals(getActionWeblog().getEditorTheme()));
+    }
+
+    private Map<ComponentType, String> buildAvailableActions() {
+        // build list of action types that may be added
+        Map<ComponentType, String> actionsMap = new EnumMap<>(ComponentType.class);
+        addComponentTypeToMap(actionsMap, ComponentType.CUSTOM);
+
+        if (WeblogTheme.CUSTOM.equals(getActionWeblog().getEditorTheme())) {
+
+            // if the weblog is using a custom theme then determine which
+            // action templates are still available to be created
+            addComponentTypeToMap(actionsMap, ComponentType.PERMALINK);
+            addComponentTypeToMap(actionsMap, ComponentType.SEARCH);
+            addComponentTypeToMap(actionsMap, ComponentType.WEBLOG);
+            addComponentTypeToMap(actionsMap, ComponentType.TAGSINDEX);
+
+            for (WeblogTemplate tmpPage : getTemplates()) {
+                if (!ComponentType.CUSTOM.equals(tmpPage.getAction())) {
+                    actionsMap.remove(tmpPage.getAction());
+                }
+            }
+        } else {
+            // Make sure we have an option for the default web page
+            addComponentTypeToMap(actionsMap, ComponentType.WEBLOG);
+            if (getNewTmplAction() == null) {
+                setNewTmplAction(ComponentType.WEBLOG);
+            }
+            for (WeblogTemplate tmpPage : getTemplates()) {
+                if (ComponentType.WEBLOG.equals(tmpPage.getAction())) {
+                    actionsMap.remove(ComponentType.WEBLOG);
+                    setNewTmplAction(null);
+                    break;
+                }
+            }
+        }
+        return actionsMap;
+    }
+
+    private boolean isRemovable(WeblogTemplate template) {
+        return !template.isRequired()
+                || !WeblogTheme.CUSTOM.equals(getActionWeblog().getEditorTheme());
+    }
+
+    private void removeAssociatedStylesheetIfNeeded(WeblogTemplate template,
+            WeblogManager mgr) throws WebloggerException {
+        // if weblog template remove custom style sheet also
+        if (WeblogTemplate.DEFAULT_PAGE.equals(template.getName())) {
+            ThemeTemplate stylesheet = getActionWeblog().getTheme().getStylesheet();
+            if (stylesheet == null) {
+                return;
+            }
+
+            // Delete style sheet if the same name
+            ThemeTemplate currentStylesheet = getActionWeblog().getTheme().getStylesheet();
+            if (currentStylesheet == null) {
+                return;
+            }
+
+            if (stylesheet.getLink().equals(currentStylesheet.getLink())) {
+                // Same so OK to delete
+                WeblogTemplate css =
+                        mgr.getTemplateByLink(getActionWeblog(), stylesheet.getLink());
+
+                if (css != null) {
+                    mgr.removeTemplate(css);
+                }
+            }
+        }
     }
 
     public List<WeblogTemplate> getTemplates() {
