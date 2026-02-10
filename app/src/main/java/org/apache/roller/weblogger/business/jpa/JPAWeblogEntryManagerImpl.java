@@ -191,13 +191,12 @@ public class JPAWeblogEntryManagerImpl implements WeblogEntryManager {
         // if the entry was published to future, set status as SCHEDULED
         // we only consider an entry future published if it is scheduled
         // more than 1 minute into the future
-        if (PubStatus.PUBLISHED.equals(entry.getStatus()) &&
-                entry.getPubTime().after(new Date(System.currentTimeMillis() + RollerConstants.MIN_IN_MS))) {
+        if (isScheduledForFuturePublish(entry)) {
             entry.setStatus(PubStatus.SCHEDULED);
         }
         
         // Store value object (creates new or updates existing)
-        entry.setUpdateTime(new Timestamp(new Date().getTime()));
+        entry.setUpdateTime(nowTimestamp());
         
         this.strategy.store(entry);
         
@@ -261,6 +260,15 @@ public class JPAWeblogEntryManagerImpl implements WeblogEntryManager {
             throws WebloggerException {
         return entryRepository.getNextPrevEntries(
             current, catName, locale, maxEntries, next);
+    }
+
+    private boolean isScheduledForFuturePublish(WeblogEntry entry) {
+        return PubStatus.PUBLISHED.equals(entry.getStatus()) &&
+                entry.getPubTime().after(new Date(System.currentTimeMillis() + RollerConstants.MIN_IN_MS));
+    }
+
+    private Timestamp nowTimestamp() {
+        return new Timestamp(new Date().getTime());
     }
     
     /**

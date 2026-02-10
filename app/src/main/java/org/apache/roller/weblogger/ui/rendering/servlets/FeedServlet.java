@@ -72,10 +72,18 @@ public class FeedServlet extends HttpServlet {
         log.info("Initializing FeedServlet");
 
         // get a reference to the weblog feed cache
-        this.weblogFeedCache = WeblogFeedCache.getInstance();
+        this.weblogFeedCache = weblogFeedCache();
 
         // get a reference to the site wide cache
-        this.siteWideCache = SiteWideCache.getInstance();
+        this.siteWideCache = siteWideCache();
+    }
+
+    protected WeblogFeedCache weblogFeedCache() {
+        return WeblogFeedCache.getInstance();
+    }
+
+    protected SiteWideCache siteWideCache() {
+        return SiteWideCache.getInstance();
     }
 
 

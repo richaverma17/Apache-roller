@@ -32,6 +32,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -54,17 +55,25 @@ public class RomeFeedFetcher implements FeedFetcher {
     
     private static final Log log = LogFactory.getLog(RomeFeedFetcher.class);
     
-    // mutable, copy() first
-    private static final HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                                .timeout(Duration.ofSeconds(3))
-                                .header("User-Agent", "RollerPlanetAggregator");
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(3);
+    private static final String USER_AGENT = "RollerPlanetAggregator";
     
     private final HttpClient client;
+    private final Clock clock;
     
     public RomeFeedFetcher() {
         // immutable + thread safe, prefers HTTP/2, no redirects
-        this.client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(3)).build();
+        this(HttpClient.newBuilder().connectTimeout(REQUEST_TIMEOUT).build(),
+                Clock.systemDefaultZone());
+    }
+
+    RomeFeedFetcher(HttpClient client) {
+        this(client, Clock.systemDefaultZone());
+    }
+
+    RomeFeedFetcher(HttpClient client, Clock clock) {
+        this.client = client;
+        this.clock = clock;
     }
     
     /**
@@ -134,7 +143,7 @@ public class RomeFeedFetcher implements FeedFetcher {
         if (newSub.getLastUpdated() != null) {
             cal.setTime(newSub.getLastUpdated());
         } else {
-            cal.setTime(new Date());
+            cal.setTime(Date.from(clock.instant()));
             cal.add(Calendar.DATE, -1);
         }
         
@@ -142,11 +151,14 @@ public class RomeFeedFetcher implements FeedFetcher {
         List<SyndEntry> feedEntries = feed.getEntries();
         for (SyndEntry feedEntry : feedEntries) {
             SubscriptionEntry newEntry = buildEntry(feedEntry);
+            if (newEntry == null) {
+                continue;
+            }
             
             // some kludge to handle feeds with no entry dates
             if (newEntry.getPubTime() == null) {
                 log.debug("No published date, assigning fake date for "+feedURL);
-                newEntry.setPubTime(new Timestamp(cal.getTimeInMillis()));
+                newEntry.setPubTime(fallbackTimestamp(cal));
                 cal.add(Calendar.DATE, -1);
             }
             
@@ -173,13 +185,7 @@ public class RomeFeedFetcher implements FeedFetcher {
         newEntry.setPermalink(romeEntry.getLink());
         
         // Play some games to get the author
-        DCModule entrydc = (DCModule)romeEntry.getModule(DCModule.URI);
-        if (romeEntry.getAuthor() != null) {
-            newEntry.setAuthor(romeEntry.getAuthor());
-        } else {
-            // use <dc:creator>
-            newEntry.setAuthor(entrydc.getCreator());
-        }
+        newEntry.setAuthor(extractAuthor(romeEntry));
         
         // Play some games to get the updated date
         if (romeEntry.getUpdatedDate() != null) {
@@ -188,30 +194,9 @@ public class RomeFeedFetcher implements FeedFetcher {
         // TODO: should we set a default update time here?
         
         // And more games getting publish date
-        if (romeEntry.getPublishedDate() != null) {
-            // use <pubDate>
-            newEntry.setPubTime(new Timestamp(romeEntry.getPublishedDate().getTime()));
-        } else if (entrydc != null && entrydc.getDate() != null) {
-            // use <dc:date>
-            newEntry.setPubTime(new Timestamp(entrydc.getDate().getTime()));
-        } else {
-            newEntry.setPubTime(newEntry.getUpdateTime());
-        }
+        newEntry.setPubTime(extractPublishTime(romeEntry, newEntry.getUpdateTime()));
         
-        // get content and unescape if it is 'text/plain'
-        if (!romeEntry.getContents().isEmpty()) {
-            SyndContent content= romeEntry.getContents().get(0);
-            if (content != null && content.getType().equals("text/plain")) {
-                newEntry.setText(StringEscapeUtils.unescapeHtml4(content.getValue()));
-            } else if (content != null) {
-                newEntry.setText(content.getValue());
-            }
-        }
-        
-        // no content, try summary
-        if (StringUtils.isBlank(newEntry.getText()) && romeEntry.getDescription() != null)  {
-            newEntry.setText(romeEntry.getDescription().getValue());
-        }
+        newEntry.setText(extractText(romeEntry));
         
         // copy categories
         if (!romeEntry.getCategories().isEmpty()) {
@@ -227,12 +212,62 @@ public class RomeFeedFetcher implements FeedFetcher {
     
     private SyndFeed fetchFeed(String url) throws IOException, InterruptedException, FeedException {
         
-        HttpRequest request = requestBuilder.copy().uri(URI.create(url)).build();
+        HttpRequest request = HttpRequest.newBuilder()
+                .timeout(REQUEST_TIMEOUT)
+                .header("User-Agent", USER_AGENT)
+                .uri(URI.create(url))
+                .build();
         
         try(XmlReader reader = new XmlReader(client.send(request, ofInputStream()).body())) {
             return new SyndFeedInput().build(reader);
         }
        
+    }
+
+    private static String extractAuthor(SyndEntry romeEntry) {
+        if (romeEntry.getAuthor() != null) {
+            return romeEntry.getAuthor();
+        }
+        DCModule entrydc = (DCModule)romeEntry.getModule(DCModule.URI);
+        if (entrydc != null) {
+            return entrydc.getCreator();
+        }
+        return null;
+    }
+
+    private static Timestamp extractPublishTime(SyndEntry romeEntry, Timestamp updateTime) {
+        if (romeEntry.getPublishedDate() != null) {
+            // use <pubDate>
+            return new Timestamp(romeEntry.getPublishedDate().getTime());
+        }
+        DCModule entrydc = (DCModule)romeEntry.getModule(DCModule.URI);
+        if (entrydc != null && entrydc.getDate() != null) {
+            // use <dc:date>
+            return new Timestamp(entrydc.getDate().getTime());
+        }
+        return updateTime;
+    }
+
+    private static String extractText(SyndEntry romeEntry) {
+        // get content and unescape if it is 'text/plain'
+        if (!romeEntry.getContents().isEmpty()) {
+            SyndContent content= romeEntry.getContents().get(0);
+            if (content != null && "text/plain".equalsIgnoreCase(content.getType())) {
+                return StringEscapeUtils.unescapeHtml4(content.getValue());
+            } else if (content != null) {
+                return content.getValue();
+            }
+        }
+        
+        // no content, try summary
+        if (romeEntry.getDescription() != null)  {
+            return romeEntry.getDescription().getValue();
+        }
+        return null;
+    }
+
+    private static Timestamp fallbackTimestamp(Calendar cal) {
+        return new Timestamp(cal.getTimeInMillis());
     }
     
 }

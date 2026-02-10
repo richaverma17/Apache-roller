@@ -97,10 +97,10 @@ public class PageServlet extends HttpServlet {
                 .getBooleanProperty("cache.excludeOwnerEditPages");
 
         // get a reference to the weblog page cache
-        this.weblogPageCache = WeblogPageCache.getInstance();
+        this.weblogPageCache = weblogPageCache();
 
         // get a reference to the site wide cache
-        this.siteWideCache = SiteWideCache.getInstance();
+        this.siteWideCache = siteWideCache();
 
         // see if built-in referrer spam check is enabled
         this.processReferrers = WebloggerConfig
@@ -127,6 +127,14 @@ public class PageServlet extends HttpServlet {
 
         // Development theme reloading
         themeReload = WebloggerConfig.getBooleanProperty("themes.reload.mode");
+    }
+
+    protected WeblogPageCache weblogPageCache() {
+        return WeblogPageCache.getInstance();
+    }
+
+    protected SiteWideCache siteWideCache() {
+        return SiteWideCache.getInstance();
     }
 
     /**
