@@ -88,6 +88,7 @@ public class FeedServlet extends HttpServlet {
 
         log.debug("Entering");
 
+        var roller = WebloggerFactory.getWeblogger();
         Weblog weblog;
         boolean isSiteWide;
 
@@ -194,8 +195,7 @@ public class FeedServlet extends HttpServlet {
 
             try {
                 // tags specified. make sure they exist.
-                WeblogEntryManager wmgr = WebloggerFactory.getWeblogger()
-                        .getWeblogEntryManager();
+                WeblogEntryManager wmgr = roller.getWeblogEntryManager();
                 invalid = !wmgr.getTagComboExists(feedRequest.getTags(),
                         (isSiteWide) ? null : weblog);
             } catch (WebloggerException ex) {
@@ -245,8 +245,7 @@ public class FeedServlet extends HttpServlet {
             initData.put("parsedRequest", feedRequest);
 
             // define url strategy
-            initData.put("urlStrategy", WebloggerFactory.getWeblogger()
-                    .getUrlStrategy());
+            initData.put("urlStrategy", roller.getUrlStrategy());
 
             // Load models for feeds
             String feedModels = WebloggerConfig

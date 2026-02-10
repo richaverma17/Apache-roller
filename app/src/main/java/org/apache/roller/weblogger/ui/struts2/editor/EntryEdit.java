@@ -116,8 +116,8 @@ public final class EntryEdit extends UIAction {
             // already saved entry
             try {
                 // retrieve from DB WeblogEntry based on ID
-                WeblogEntryManager wmgr = WebloggerFactory.getWeblogger()
-                        .getWeblogEntryManager();
+                var roller = WebloggerFactory.getWeblogger();
+                WeblogEntryManager wmgr = roller.getWeblogEntryManager();
                 setEntry(wmgr.getWeblogEntry(getBean().getId()));
             } catch (WebloggerException ex) {
                 log.error(
@@ -182,11 +182,10 @@ public final class EntryEdit extends UIAction {
     private String save() {
         if (!hasActionErrors()) {
             try {
-                WeblogEntryManager weblogEntryManager = WebloggerFactory.getWeblogger()
-                        .getWeblogEntryManager();
+                var roller = WebloggerFactory.getWeblogger();
+                WeblogEntryManager weblogEntryManager = roller.getWeblogEntryManager();
 
-                IndexManager indexMgr = WebloggerFactory.getWeblogger()
-                        .getIndexManager();
+                IndexManager indexMgr = roller.getIndexManager();
 
                 WeblogEntry weblogEntry = getEntry();
 
@@ -243,8 +242,7 @@ public final class EntryEdit extends UIAction {
     }
 
     public String getPreviewURL() {
-        return WebloggerFactory
-                .getWeblogger()
+        return WebloggerFactory.getWeblogger()
                 .getUrlStrategy()
                 .getPreviewURLStrategy(null)
                 .getWeblogEntryURL(getActionWeblog(), null,
@@ -375,7 +373,8 @@ public final class EntryEdit extends UIAction {
             wesc.setMaxResults(20);
             wesc.setStatus(pubStatus);
             wesc.setSortBy(sortBy);
-            entries = WebloggerFactory.getWeblogger().getWeblogEntryManager()
+            entries = WebloggerFactory.getWeblogger()
+                    .getWeblogEntryManager()
                     .getWeblogEntries(wesc);
         } catch (WebloggerException ex) {
             log.error("Error getting entries list", ex);

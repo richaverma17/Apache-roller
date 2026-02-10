@@ -676,10 +676,11 @@ public class WeblogEntry implements Serializable {
     
     /**
      * TODO: why is this method exposed to users with ability to get spam/non-approved comments?
+     * Note: ignoreSpam is ignored; spam filtering is handled by the underlying query.
      */
     @Deprecated
     public List<WeblogEntryComment> getComments(boolean ignoreSpam, boolean approvedOnly) {
-        return WeblogEntryAccess.getComments(this, ignoreSpam, approvedOnly);
+        return WeblogEntryAccess.getComments(this, approvedOnly);
     }
     
     public int getCommentCount() {

@@ -119,7 +119,8 @@ public class PlanetGroupSubs extends PlanetUIAction implements ServletRequestAwa
 
         if (!hasActionErrors()) {
             try {
-                PlanetManager planetManager = WebloggerFactory.getWeblogger().getPlanetManager();
+                var roller = WebloggerFactory.getWeblogger();
+                PlanetManager planetManager = roller.getPlanetManager();
 
                 PlanetGroup existingGroup = planetManager.getGroup(getPlanet(), getGroup().getHandle());
 
@@ -134,7 +135,7 @@ public class PlanetGroupSubs extends PlanetUIAction implements ServletRequestAwa
                     planetManager.saveGroup(existingGroup);
                 }
 
-                WebloggerFactory.getWeblogger().flush();
+                roller.flush();
                 addMessage("planetGroups.success.saved");
 
             } catch (Exception ex) {
@@ -176,7 +177,8 @@ public class PlanetGroupSubs extends PlanetUIAction implements ServletRequestAwa
 
         if (!hasActionErrors()) {
             try {
-                PlanetManager pmgr = WebloggerFactory.getWeblogger().getPlanetManager();
+                var roller = WebloggerFactory.getWeblogger();
+                PlanetManager pmgr = roller.getPlanetManager();
 
                 // check if this subscription already exists before adding it
                 Subscription sub = pmgr.getSubscription(getSubUrl());
@@ -184,7 +186,7 @@ public class PlanetGroupSubs extends PlanetUIAction implements ServletRequestAwa
                     log.debug("Adding New Subscription - " + getSubUrl());
 
                     // sub doesn't exist yet, so we need to fetch it
-                    FeedFetcher fetcher = WebloggerFactory.getWeblogger().getFeedFetcher();
+                    FeedFetcher fetcher = roller.getFeedFetcher();
                     sub = fetcher.fetchSubscription(getSubUrl());
 
                     // save new sub
@@ -199,7 +201,7 @@ public class PlanetGroupSubs extends PlanetUIAction implements ServletRequestAwa
                 group.getSubscriptions().add(sub);
                 sub.getGroups().add(group);
                 pmgr.saveGroup(group);
-                WebloggerFactory.getWeblogger().flush();
+                roller.flush();
 
                 // clear field after success
                 setSubUrl(null);
@@ -227,7 +229,8 @@ public class PlanetGroupSubs extends PlanetUIAction implements ServletRequestAwa
         if (getSubUrl() != null) {
             try {
 
-                PlanetManager pmgr = WebloggerFactory.getWeblogger().getPlanetManager();
+                var roller = WebloggerFactory.getWeblogger();
+                PlanetManager pmgr = roller.getPlanetManager();
 
                 Subscription sub = pmgr.getSubscription(getSubUrl());
 
@@ -239,7 +242,7 @@ public class PlanetGroupSubs extends PlanetUIAction implements ServletRequestAwa
                 sub.getGroups().remove(getGroup());
                 pmgr.saveSubscription(sub);
 
-                WebloggerFactory.getWeblogger().flush();
+                roller.flush();
 
                 // clear field after success
                 setSubUrl(null);

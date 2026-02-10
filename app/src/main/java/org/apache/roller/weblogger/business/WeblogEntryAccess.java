@@ -33,8 +33,7 @@ public class WeblogEntryAccess {
         return null;
     }
 
-    public static List<WeblogEntryComment> getComments(WeblogEntry entry,
-                                                       boolean ignoreSpam, boolean approvedOnly) {
+    public static List<WeblogEntryComment> getComments(WeblogEntry entry, boolean approvedOnly) {
         try {
             WeblogEntryManager wmgr = WebloggerFactory.getWeblogger()
                     .getWeblogEntryManager();
